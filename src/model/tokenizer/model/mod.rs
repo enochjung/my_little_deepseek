@@ -8,64 +8,7 @@ mod vocab;
 use merge::MergeEngine;
 use vocab::VocabEngine;
 
-/*
-
-{
-  "version": "1.0",
-  "truncation": null,
-  "padding": null,
-  "added_tokens": [
-    {
-      "id": 151643,
-      "content": "<｜end▁of▁sentence｜>",
-      "single_word": false,
-      "lstrip": false,
-      "rstrip": false,
-      "normalized": false,
-      "special": true
-    },
-    ...
-    {
-      "id": 151664,
-      "content": "<|file_sep|>",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false,
-      "special": false
-    }
-  ],
-  ...
-  "model": {
-    "type": "BPE",
-    "dropout": null,
-    "unk_token": null,
-    "continuing_subword_prefix": "",
-    "end_of_word_suffix": "",
-    "fuse_unk": false,
-    "byte_fallback": false,
-    "vocab": {
-      "!": 0,
-      "\"": 1,
-      "#": 2,
-      ...
-      "âį¨": 151640,
-      "âºŁ": 151641,
-      "â½Ĺ": 151642
-    },
-    "merges": [
-      "Ġ Ġ",
-      "ĠĠ ĠĠ",
-      "i n",
-      ...
-      "âį ¨",
-      "âº Ł",
-      "â½ Ĺ"
-    ]
-  }
-}
-
-*/
+// "model": { "type": "BPE" }
 
 pub struct ModelEngine {
     #[allow(unused)]
@@ -86,8 +29,27 @@ impl ModelEngine {
     }
 
     pub fn encode(&self, pretokenized: &[Vec<u8>]) -> Result<Vec<u32>, AppError> {
-        let _ = pretokenized;
-        todo!()
+        let mut tokens = Vec::new();
+
+        for token_bytes in pretokenized {
+            let token_str = std::str::from_utf8(token_bytes)
+                .map_err(|_| AppError::InvalidState("pretokenized token is not valid UTF-8"))?;
+            let mut symbols: Vec<String> = token_str.chars().map(|c| c.to_string()).collect();
+            /*
+            let mut symbols: Vec<String> = token_bytes
+                .iter()
+                .map(|x| (*x as char).to_string())
+                .collect();
+            */
+            self.merge_engine.merge(&mut symbols);
+            let ids = self
+                .vocab_engine
+                .encode(&symbols)
+                .ok_or(AppError::InvalidState("BPE symbol not found in vocab"))?;
+            tokens.extend(ids);
+        }
+
+        Ok(tokens)
     }
 }
 
