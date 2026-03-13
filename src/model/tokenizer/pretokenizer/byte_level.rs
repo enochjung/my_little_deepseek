@@ -27,9 +27,9 @@ fn encode_token(token: &str) -> Vec<u8> {
 fn byte_to_unicode(byte: u8) -> char {
     let codepoint = match byte {
         33..=126 | 161..=172 | 174..=255 => byte as u32,
-        0..=32 => 256 + byte as u32,
-        127..=160 => 256 + 33 + (byte as u32 - 127),
-        173 => 323,
+        0..=32 => 0x100 + byte as u32,
+        127..=160 => 0x121 + (byte as u32 - 127),
+        173 => 0x122,
     };
 
     char::from_u32(codepoint).expect("byte-level mapping should always be valid")
