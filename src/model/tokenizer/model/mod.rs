@@ -2,92 +2,43 @@ use std::fs::File;
 
 use crate::error::AppError;
 
-mod merge;
+mod merges;
 mod vocab;
 
-use merge::MergeEngine;
+use merges::MergesEngine;
 use vocab::VocabEngine;
-
-/*
-
-{
-  "version": "1.0",
-  "truncation": null,
-  "padding": null,
-  "added_tokens": [
-    {
-      "id": 151643,
-      "content": "<｜end▁of▁sentence｜>",
-      "single_word": false,
-      "lstrip": false,
-      "rstrip": false,
-      "normalized": false,
-      "special": true
-    },
-    ...
-    {
-      "id": 151664,
-      "content": "<|file_sep|>",
-      "lstrip": false,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false,
-      "special": false
-    }
-  ],
-  ...
-  "model": {
-    "type": "BPE",
-    "dropout": null,
-    "unk_token": null,
-    "continuing_subword_prefix": "",
-    "end_of_word_suffix": "",
-    "fuse_unk": false,
-    "byte_fallback": false,
-    "vocab": {
-      "!": 0,
-      "\"": 1,
-      "#": 2,
-      ...
-      "âį¨": 151640,
-      "âºŁ": 151641,
-      "â½Ĺ": 151642
-    },
-    "merges": [
-      "Ġ Ġ",
-      "ĠĠ ĠĠ",
-      "i n",
-      ...
-      "âį ¨",
-      "âº Ł",
-      "â½ Ĺ"
-    ]
-  }
-}
-
-*/
 
 pub struct ModelEngine {
     #[allow(unused)]
     vocab_engine: VocabEngine,
     #[allow(unused)]
-    merge_engine: MergeEngine,
+    merges_engine: MergesEngine,
 }
 
 impl ModelEngine {
     pub fn new(vocab_file: File, merges_file: File) -> Result<Self, AppError> {
-        let vocab_engine = VocabEngine::new(vocab_file);
-        let merge_engine = MergeEngine::new(merges_file);
+        let vocab_engine = VocabEngine::new(vocab_file)?;
+        let merges_engine = MergesEngine::new(merges_file)?;
 
         Ok(Self {
             vocab_engine,
-            merge_engine,
+            merges_engine,
         })
     }
 
-    pub fn encode(&self, pretokenized: &[Vec<u8>]) -> Result<Vec<u32>, AppError> {
-        let _ = pretokenized;
-        todo!()
+    pub fn encode(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, AppError> {
+        let mut token_ids = Vec::new();
+
+        for word in pretokenized {
+            let merged_word = self.merges_engine.merge(word)?;
+
+            for token in merged_word {
+                let token_id = self.vocab_engine.tokenize(&token)?;
+                token_ids.push(token_id);
+            }
+        }
+
+        Ok(token_ids)
     }
 }
 
@@ -100,8 +51,8 @@ mod tests {
 
     use super::ModelEngine;
 
-    fn tok(s: &str) -> Vec<u8> {
-        s.as_bytes().to_vec()
+    fn tok(s: &str) -> Vec<String> {
+        s.chars().map(|c| c.to_string()).collect()
     }
 
     fn build_engine() -> ModelEngine {

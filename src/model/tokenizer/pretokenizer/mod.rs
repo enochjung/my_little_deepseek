@@ -12,15 +12,15 @@ pub struct PretokenizerEngine {
 
 impl PretokenizerEngine {
     pub fn new() -> Result<Self, AppError> {
-        let split = SplitEngine::new();
-        let byte_level = ByteLevelEngine::new();
+        let split = SplitEngine::new()?;
+        let byte_level = ByteLevelEngine::new()?;
 
         Ok(Self { split, byte_level })
     }
 
-    pub fn pretokenize(&self, input: &str) -> Result<Vec<Vec<u8>>, AppError> {
+    pub fn pretokenize(&self, input: &str) -> Result<Vec<Vec<String>>, AppError> {
         let split_spans = self.split.pretokenize(input)?;
-        let byte_level_tokens = self.byte_level.pretokenize(input, &split_spans);
+        let byte_level_tokens = self.byte_level.pretokenize(input, &split_spans)?;
 
         Ok(byte_level_tokens)
     }
