@@ -1,65 +1,79 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
 use std::fs::File;
+use std::io::{BufRead, BufReader};
+
+use crate::error::AppError;
 
 pub struct VocabEngine {
-    token_to_id: HashMap<String, u32>,
+    vocab: HashMap<String, u32>,
 }
 
 impl VocabEngine {
-    pub fn new(vocab_file: File) -> Self {
-        let mut token_to_id = HashMap::new();
-        for line in BufReader::new(vocab_file).lines() {
-            let line = line.expect("failed to read vocab line");
+    pub fn new(vocab_file: File) -> Result<Self, AppError> {
+        let reader = BufReader::new(vocab_file);
+        let mut vocab = HashMap::with_capacity(151644);
+
+        for line in reader.lines() {
+            let line = line.map_err(AppError::Io)?;
             let line = line.trim();
-            // lines look like: "<token>": <id>,
             if !line.starts_with('"') {
                 continue;
             }
-            if let Some((key, rest)) = parse_json_string_key(line) {
-                // rest is like ": 12345," or ": 12345"
-                let rest = rest.trim_start_matches(':').trim();
-                let id_str = rest.trim_end_matches(',').trim();
-                if let Ok(id) = id_str.parse::<u32>() {
-                    token_to_id.insert(key, id);
-                }
+            if let Some((key, id)) = parse_json_string(line) {
+                vocab.insert(key, id);
             }
         }
-        Self { token_to_id }
+
+        Ok(Self { vocab })
     }
 
-    /// Map a sequence of BPE symbols to their vocab IDs.
-    /// Returns `None` if any symbol is not in the vocabulary.
-    pub fn encode(&self, symbols: &[String]) -> Option<Vec<u32>> {
-        symbols.iter().map(|s| self.token_to_id.get(s.as_str()).copied()).collect()
+    pub fn tokenize(&self, word: &str) -> Result<u32, AppError> {
+        self.vocab
+            .get(word)
+            .copied()
+            .ok_or(AppError::InvalidState("token not found in vocab"))
     }
 }
 
-/// Parse a JSON-quoted string key from the start of `s`.
-/// Returns `(unescaped_key, remaining_after_closing_quote)`.
-fn parse_json_string_key(s: &str) -> Option<(String, &str)> {
-    let s = s.strip_prefix('"')?;
+fn parse_json_string(s: &str) -> Option<(String, u32)> {
+    debug_assert!(s.starts_with('"'));
+    let inner = &s[1..];
     let mut result = String::new();
-    let mut chars = s.char_indices();
+    let mut iter = inner.char_indices();
     loop {
-        let (i, c) = chars.next()?;
-        if c == '"' {
-            return Some((result, &s[i + 1..]));
-        } else if c == '\\' {
-            let (_, esc) = chars.next()?;
-            match esc {
+        let (i, c) = iter.next()?;
+        match c {
+            '"' => {
+                let rest = inner[i + 1..].trim_start();
+                let rest = rest.strip_prefix(':')?;
+                let id = rest
+                    .trim()
+                    .trim_end_matches(',')
+                    .trim()
+                    .parse::<u32>()
+                    .ok()?;
+                return Some((result, id));
+            }
+            '\\' => match iter.next()?.1 {
                 '"' => result.push('"'),
                 '\\' => result.push('\\'),
+                '/' => result.push('/'),
                 'n' => result.push('\n'),
                 'r' => result.push('\r'),
                 't' => result.push('\t'),
+                'u' => {
+                    let mut hex = String::with_capacity(4);
+                    for _ in 0..4 {
+                        hex.push(iter.next()?.1);
+                    }
+                    result.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+                }
                 other => {
                     result.push('\\');
                     result.push(other);
                 }
-            }
-        } else {
-            result.push(c);
+            },
+            _ => result.push(c),
         }
     }
 }

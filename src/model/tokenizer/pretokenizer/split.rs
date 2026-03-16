@@ -5,8 +5,8 @@ pub struct SplitEngine;
 // behavior=Isolated, invert=false, regex_pattern:
 // (?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+
 impl SplitEngine {
-    pub fn new() -> Self {
-        Self
+    pub fn new() -> Result<Self, AppError> {
+        Ok(Self)
     }
 
     pub fn pretokenize(&self, input: &str) -> Result<Vec<(usize, usize)>, AppError> {
@@ -229,7 +229,7 @@ mod tests {
     use super::SplitEngine;
 
     fn assert_spans(input: &str, expected: &[(usize, usize)]) {
-        let engine = SplitEngine::new();
+        let engine = SplitEngine::new().unwrap();
         let spans = engine
             .pretokenize(input)
             .expect("split pretokenize should succeed");

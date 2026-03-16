@@ -2,54 +2,43 @@ use std::fs::File;
 
 use crate::error::AppError;
 
-mod merge;
+mod merges;
 mod vocab;
 
-use merge::MergeEngine;
+use merges::MergesEngine;
 use vocab::VocabEngine;
-
-// "model": { "type": "BPE" }
 
 pub struct ModelEngine {
     #[allow(unused)]
     vocab_engine: VocabEngine,
     #[allow(unused)]
-    merge_engine: MergeEngine,
+    merges_engine: MergesEngine,
 }
 
 impl ModelEngine {
     pub fn new(vocab_file: File, merges_file: File) -> Result<Self, AppError> {
-        let vocab_engine = VocabEngine::new(vocab_file);
-        let merge_engine = MergeEngine::new(merges_file);
+        let vocab_engine = VocabEngine::new(vocab_file)?;
+        let merges_engine = MergesEngine::new(merges_file)?;
 
         Ok(Self {
             vocab_engine,
-            merge_engine,
+            merges_engine,
         })
     }
 
-    pub fn encode(&self, pretokenized: &[Vec<u8>]) -> Result<Vec<u32>, AppError> {
-        let mut tokens = Vec::new();
+    pub fn encode(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, AppError> {
+        let mut token_ids = Vec::new();
 
-        for token_bytes in pretokenized {
-            let token_str = std::str::from_utf8(token_bytes)
-                .map_err(|_| AppError::InvalidState("pretokenized token is not valid UTF-8"))?;
-            let mut symbols: Vec<String> = token_str.chars().map(|c| c.to_string()).collect();
-            /*
-            let mut symbols: Vec<String> = token_bytes
-                .iter()
-                .map(|x| (*x as char).to_string())
-                .collect();
-            */
-            self.merge_engine.merge(&mut symbols);
-            let ids = self
-                .vocab_engine
-                .encode(&symbols)
-                .ok_or(AppError::InvalidState("BPE symbol not found in vocab"))?;
-            tokens.extend(ids);
+        for word in pretokenized {
+            let merged_word = self.merges_engine.merge(word)?;
+
+            for token in merged_word {
+                let token_id = self.vocab_engine.tokenize(&token)?;
+                token_ids.push(token_id);
+            }
         }
 
-        Ok(tokens)
+        Ok(token_ids)
     }
 }
 
@@ -62,8 +51,8 @@ mod tests {
 
     use super::ModelEngine;
 
-    fn tok(s: &str) -> Vec<u8> {
-        s.as_bytes().to_vec()
+    fn tok(s: &str) -> Vec<String> {
+        s.chars().map(|c| c.to_string()).collect()
     }
 
     fn build_engine() -> ModelEngine {
