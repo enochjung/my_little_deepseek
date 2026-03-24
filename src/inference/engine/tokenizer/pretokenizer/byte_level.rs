@@ -1,21 +1,17 @@
-use crate::error::AppError;
+use super::Error;
 
 pub struct ByteLevelEngine;
 
 // add_prefix_space=false, trim_offsets=false, use_regex=false.
 impl ByteLevelEngine {
-    pub fn new() -> Result<Self, AppError> {
+    pub fn new() -> Result<Self, Error> {
         Ok(Self)
     }
 
-    pub fn pretokenize(
-        &self,
-        input: &str,
-        split_spans: &[(usize, usize)],
-    ) -> Result<Vec<Vec<String>>, AppError> {
-        Ok(split_spans
+    pub fn pretokenize(&self, split_slices: &[&str]) -> Result<Vec<Vec<String>>, Error> {
+        Ok(split_slices
             .iter()
-            .map(|&(start, end)| encode_token(&input[start..end]))
+            .map(|&slices| encode_token(slices))
             .collect())
     }
 }
@@ -54,8 +50,8 @@ mod tests {
     fn pretokenize_case1_hello() {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
-            engine.pretokenize("Hello!", &[(0, 5), (5, 6)]).unwrap(),
-            vec![tok("Hello"), tok("!")],
+            engine.pretokenize(&["Hello", "!"]).unwrap(),
+            vec![tok("Hello"), tok("!")]
         );
     }
 
@@ -64,19 +60,16 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Summarize: Rust ownership prevents data races.",
-                    &[
-                        (0, 9),
-                        (9, 10),
-                        (10, 15),
-                        (15, 25),
-                        (25, 34),
-                        (34, 39),
-                        (39, 45),
-                        (45, 46),
-                    ],
-                )
+                .pretokenize(&[
+                    "Summarize",
+                    ":",
+                    " Rust",
+                    " ownership",
+                    " prevents",
+                    " data",
+                    " races",
+                    "."
+                ])
                 .unwrap(),
             vec![
                 tok("Summarize"),
@@ -96,19 +89,7 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "What is 2 + 2?",
-                    &[
-                        (0, 4),
-                        (4, 7),
-                        (7, 8),
-                        (8, 9),
-                        (9, 11),
-                        (11, 12),
-                        (12, 13),
-                        (13, 14),
-                    ],
-                )
+                .pretokenize(&["What", " is", " ", "2", " +", " ", "2", "?"])
                 .unwrap(),
             vec![
                 tok("What"),
@@ -128,29 +109,26 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Whitespace test:  keep   multiple spaces, tabs\t, and blank lines\n\nend.",
-                    &[
-                        (0, 10),
-                        (10, 15),
-                        (15, 16),
-                        (16, 17),
-                        (17, 22),
-                        (22, 24),
-                        (24, 33),
-                        (33, 40),
-                        (40, 41),
-                        (41, 46),
-                        (46, 47),
-                        (47, 48),
-                        (48, 52),
-                        (52, 58),
-                        (58, 64),
-                        (64, 66),
-                        (66, 69),
-                        (69, 70),
-                    ],
-                )
+                .pretokenize(&[
+                    "Whitespace",
+                    " test",
+                    ":",
+                    " ",
+                    " keep",
+                    "  ",
+                    " multiple",
+                    " spaces",
+                    ",",
+                    " tabs",
+                    "\t",
+                    ",",
+                    " and",
+                    " blank",
+                    " lines",
+                    "\n\n",
+                    "end",
+                    ".",
+                ])
                 .unwrap(),
             vec![
                 tok("Whitespace"),
@@ -180,21 +158,18 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Emoji test: cats 😺 rockets 🚀 and sparkles ✨.",
-                    &[
-                        (0, 5),
-                        (5, 10),
-                        (10, 11),
-                        (11, 16),
-                        (16, 21),
-                        (21, 29),
-                        (29, 34),
-                        (34, 38),
-                        (38, 47),
-                        (47, 52),
-                    ],
-                )
+                .pretokenize(&[
+                    "Emoji",
+                    " test",
+                    ":",
+                    " cats",
+                    " 😺",
+                    " rockets",
+                    " 🚀",
+                    " and",
+                    " sparkles",
+                    " ✨.",
+                ])
                 .unwrap(),
             vec![
                 tok("Emoji"),
@@ -216,29 +191,10 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Answer with JSON: { \"name\": \"Alice\", \"age\": 27 }",
-                    &[
-                        (0, 6),
-                        (6, 11),
-                        (11, 16),
-                        (16, 17),
-                        (17, 19),
-                        (19, 21),
-                        (21, 25),
-                        (25, 27),
-                        (27, 29),
-                        (29, 34),
-                        (34, 36),
-                        (36, 38),
-                        (38, 41),
-                        (41, 43),
-                        (43, 44),
-                        (44, 45),
-                        (45, 46),
-                        (46, 48),
-                    ],
-                )
+                .pretokenize(&[
+                    "Answer", " with", " JSON", ":", " {", " \"", "name", "\":", " \"", "Alice",
+                    "\",", " \"", "age", "\":", " ", "2", "7", " }",
+                ])
                 .unwrap(),
             vec![
                 tok("Answer"),
@@ -268,41 +224,10 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "List these: 2, 3, 5, 7, 11, 13, 17, 19",
-                    &[
-                        (0, 4),
-                        (4, 10),
-                        (10, 11),
-                        (11, 12),
-                        (12, 13),
-                        (13, 14),
-                        (14, 15),
-                        (15, 16),
-                        (16, 17),
-                        (17, 18),
-                        (18, 19),
-                        (19, 20),
-                        (20, 21),
-                        (21, 22),
-                        (22, 23),
-                        (23, 24),
-                        (24, 25),
-                        (25, 26),
-                        (26, 27),
-                        (27, 28),
-                        (28, 29),
-                        (29, 30),
-                        (30, 31),
-                        (31, 32),
-                        (32, 33),
-                        (33, 34),
-                        (34, 35),
-                        (35, 36),
-                        (36, 37),
-                        (37, 38),
-                    ],
-                )
+                .pretokenize(&[
+                    "List", " these", ":", " ", "2", ",", " ", "3", ",", " ", "5", ",", " ", "7",
+                    ",", " ", "1", "1", ",", " ", "1", "3", ",", " ", "1", "7", ",", " ", "1", "9",
+                ])
                 .unwrap(),
             vec![
                 tok("List"),
@@ -344,21 +269,18 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Code tip: avoid unwrap() in production Rust.",
-                    &[
-                        (0, 4),
-                        (4, 8),
-                        (8, 9),
-                        (9, 15),
-                        (15, 22),
-                        (22, 24),
-                        (24, 27),
-                        (27, 38),
-                        (38, 43),
-                        (43, 44),
-                    ],
-                )
+                .pretokenize(&[
+                    "Code",
+                    " tip",
+                    ":",
+                    " avoid",
+                    " unwrap",
+                    "()",
+                    " in",
+                    " production",
+                    " Rust",
+                    "."
+                ])
                 .unwrap(),
             vec![
                 tok("Code"),
@@ -380,27 +302,10 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Compute: 127 * 43 = 5461",
-                    &[
-                        (0, 7),
-                        (7, 8),
-                        (8, 9),
-                        (9, 10),
-                        (10, 11),
-                        (11, 12),
-                        (12, 14),
-                        (14, 15),
-                        (15, 16),
-                        (16, 17),
-                        (17, 19),
-                        (19, 20),
-                        (20, 21),
-                        (21, 22),
-                        (22, 23),
-                        (23, 24),
-                    ],
-                )
+                .pretokenize(&[
+                    "Compute", ":", " ", "1", "2", "7", " *", " ", "4", "3", " =", " ", "5", "4",
+                    "6", "1",
+                ])
                 .unwrap(),
             vec![
                 tok("Compute"),
@@ -428,28 +333,10 @@ mod tests {
         let engine = ByteLevelEngine::new().unwrap();
         assert_eq!(
             engine
-                .pretokenize(
-                    "Code:\n```python\nfor i in range(3):\n    print(i)\n```",
-                    &[
-                        (0, 4),
-                        (4, 6),
-                        (6, 9),
-                        (9, 15),
-                        (15, 16),
-                        (16, 19),
-                        (19, 21),
-                        (21, 24),
-                        (24, 30),
-                        (30, 31),
-                        (31, 32),
-                        (32, 35),
-                        (35, 38),
-                        (38, 44),
-                        (44, 46),
-                        (46, 48),
-                        (48, 51),
-                    ],
-                )
+                .pretokenize(&[
+                    "Code", ":\n", "```", "python", "\n", "for", " i", " in", " range", "(", "3",
+                    "):\n", "   ", " print", "(i", ")\n", "```",
+                ])
                 .unwrap(),
             vec![
                 tok("Code"),

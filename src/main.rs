@@ -1,31 +1,31 @@
-use std::fs::File;
+mod inference;
 
-mod error;
-mod model;
+use std::io::Write;
 
-use model::InferenceModelEngine;
-
-const UNICODE_DATA_PATH: &'static str = "model/UnicodeData.txt";
-const COMPOSITION_EXCLUSIONS_PATH: &'static str = "model/CompositionExclusions.txt";
+const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
+const EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
+const MERGE_PATH: &'static str = "model/merges.json";
 const VOCAB_PATH: &'static str = "model/vocab.json";
-const MERGES_PATH: &'static str = "model/merges.json";
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let unicode_data_file = File::open(UNICODE_DATA_PATH)?;
-    let composition_exclusions_file = File::open(COMPOSITION_EXCLUSIONS_PATH)?;
-    let vocab_file = File::open(VOCAB_PATH)?;
-    let merges_file = File::open(MERGES_PATH)?;
+fn main() {
+    print!("[] Initializing... ");
+    std::io::stdout().flush().unwrap();
 
-    let mut inference_model_engine = InferenceModelEngine::new(
-        unicode_data_file,
-        composition_exclusions_file,
-        vocab_file,
-        merges_file,
-    )?;
+    let model_data =
+        inference::ModelData::new(UNICODE_PATH, EXCLUSION_PATH, MERGE_PATH, VOCAB_PATH)
+            .expect("Error occured at initializing data");
+    let mut inference_engine =
+        inference::InferenceEngine::new(&model_data).expect("Error occured at initializing model");
+
+    println!("done!");
+    println!("---------------------------------");
 
     loop {
+        print!("[User]: ");
         let mut input = String::new();
-        let bytes_read = std::io::stdin().read_line(&mut input)?;
+        let bytes_read = std::io::stdin()
+            .read_line(&mut input)
+            .expect("Error occured at reading user input");
         if bytes_read == 0 {
             break;
         }
@@ -35,9 +35,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
-        let output = inference_model_engine.run_prompt(input)?;
-        println!("{}", output);
+        print!("[] Inferencing... ");
+        std::io::stdout().flush().unwrap();
+
+        let output = inference_engine
+            .run_prompt(input)
+            .expect("Error occured at inferencing");
+
+        println!("done!");
+
+        println!("[Assistant]: {output}");
     }
 
-    Ok(())
+    println!("---------------------------------");
+    println!("Goodbye!");
 }
