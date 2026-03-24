@@ -5,7 +5,7 @@ pub const ASSISTANT: u32 = 151645; // <｜Assistant｜>
 pub const BEGIN_OF_SENTENCE: u32 = 151646; // <｜begin▁of▁sentence｜>
 #[allow(unused)]
 pub const EOT: u32 = 151647; // <|EOT|>
-pub const THINK: u32 = 151648; // <think>
+pub const THINK_START: u32 = 151648; // <think>
 #[allow(unused)]
 pub const THINK_END: u32 = 151649; // </think>
 #[allow(unused)]
@@ -23,7 +23,7 @@ pub const IMAGE_PAD: u32 = 151655; // <|image_pad|>
 #[allow(unused)]
 pub const VIDEO_PAD: u32 = 151656; // <|video_pad|>
 #[allow(unused)]
-pub const TOOL_CALL: u32 = 151657; // <tool_call>
+pub const TOOL_CALL_START: u32 = 151657; // <tool_call>
 #[allow(unused)]
 pub const TOOL_CALL_END: u32 = 151658; // </tool_call>
 #[allow(unused)]

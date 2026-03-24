@@ -1,40 +1,35 @@
-use std::fs::File;
-
 mod model;
 mod normalizer;
 mod pretokenizer;
 
-use crate::error::AppError;
+use super::{Error, ModelData};
 use model::ModelEngine;
 use normalizer::NormalizerEngine;
 use pretokenizer::PretokenizerEngine;
 
-pub struct TokenizerEngine {
-    normalizer_engine: NormalizerEngine,
+pub struct TokenizerEngine<'a> {
+    #[allow(unused)]
+    model_data: &'a ModelData,
+    normalizer_engine: NormalizerEngine<'a>,
     pretokenizer_engine: PretokenizerEngine,
-    model_engine: ModelEngine,
+    model_engine: ModelEngine<'a>,
 }
 
-impl TokenizerEngine {
-    pub fn new(
-        unicode_data_file: File,
-        composition_exclusions_file: File,
-        vocab_file: File,
-        merges_file: File,
-    ) -> Result<Self, AppError> {
-        let normalizer_engine =
-            NormalizerEngine::new(unicode_data_file, composition_exclusions_file)?;
+impl<'a> TokenizerEngine<'a> {
+    pub fn new(model_data: &'a ModelData) -> Result<Self, Error> {
+        let normalizer_engine = NormalizerEngine::new(model_data)?;
         let pretokenizer_engine = PretokenizerEngine::new()?;
-        let model_engine = ModelEngine::new(vocab_file, merges_file)?;
+        let model_engine = ModelEngine::new(model_data)?;
 
         Ok(Self {
+            model_data,
             normalizer_engine,
             pretokenizer_engine,
             model_engine,
         })
     }
 
-    pub fn tokenize(&self, input: &str) -> Result<Vec<u32>, AppError> {
+    pub fn tokenize(&self, input: &str) -> Result<Vec<u32>, Error> {
         let normalized_input = self.normalizer_engine.normalize(input)?;
         let pretokenized_input = self.pretokenizer_engine.pretokenize(&normalized_input)?;
         let tokens = self.model_engine.encode(&pretokenized_input)?;
@@ -45,27 +40,22 @@ impl TokenizerEngine {
 
 #[cfg(test)]
 mod tests {
+    use super::ModelData;
     use super::TokenizerEngine;
-    use std::fs::File;
 
-    fn build_tokenizer_engine() -> TokenizerEngine {
-        let unicode_data_file = File::open("model/UnicodeData.txt").unwrap();
-        let composition_exclusions_file = File::open("model/CompositionExclusions.txt").unwrap();
-        let vocab_file = File::open("model/vocab.json").unwrap();
-        let merges_file = File::open("model/merges.json").unwrap();
-
-        TokenizerEngine::new(
-            unicode_data_file,
-            composition_exclusions_file,
-            vocab_file,
-            merges_file,
-        )
-        .unwrap()
-    }
+    const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
+    const EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
+    const MERGE_PATH: &'static str = "model/merges.json";
+    const VOCAB_PATH: &'static str = "model/vocab.json";
 
     fn assert_token_ids(input: &str, expected: &[u32]) {
-        let tokenizer = build_tokenizer_engine();
-        let actual = tokenizer.tokenize(input).expect("tokenize should succeed");
+        let model_data = ModelData::new(UNICODE_PATH, EXCLUSION_PATH, MERGE_PATH, VOCAB_PATH)
+            .expect("Error occured at initializing data");
+        let tokenizer =
+            TokenizerEngine::new(&model_data).expect("Error occured at initializing tokenizer");
+        let actual = tokenizer
+            .tokenize(input)
+            .expect("Error occured at tokenizing");
         assert_eq!(actual, expected);
     }
 
