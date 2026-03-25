@@ -2,6 +2,7 @@ mod exclusion;
 mod merge;
 mod unicode;
 mod vocab;
+mod weights;
 
 pub use exclusion::{ExclusionBinary, ExclusionText};
 pub use merge::{MergeBinary, MergeText};
