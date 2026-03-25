@@ -71,7 +71,6 @@ impl Text for WeightText {
     }
 }
 
-// Splits a safetensors blob into byte ranges for JSON header and binary payload.
 fn split_sections(raw: &[u8], path: &str) -> Result<(Range<usize>, Range<usize>), Error> {
     if raw.len() < 8 {
         return Err(Error::broken_data(path, 0));
@@ -86,7 +85,6 @@ fn split_sections(raw: &[u8], path: &str) -> Result<(Range<usize>, Range<usize>)
         .checked_add(header_len as usize)
         .ok_or_else(|| Error::broken_data(path, 0))?;
 
-    // Require both header and payload sections to exist.
     if header_end >= raw.len() {
         return Err(Error::broken_data(path, 0));
     }
@@ -99,12 +97,10 @@ fn split_sections(raw: &[u8], path: &str) -> Result<(Range<usize>, Range<usize>)
     Ok((header_start..header_end, header_end..raw.len()))
 }
 
-// Parses safetensors JSON metadata into tensor info map without external crates.
 fn parse_header(header: &[u8], path: &str) -> Result<HashMap<String, TensorInfo>, Error> {
     HeaderParser::new(header, path).parse_tensor_map()
 }
 
-// Removes a required tensor entry from metadata map.
 fn take_tensor(tensors: &mut HashMap<String, TensorInfo>, key: &str) -> Result<TensorInfo, Error> {
     tensors
         .remove(key)
@@ -112,7 +108,6 @@ fn take_tensor(tensors: &mut HashMap<String, TensorInfo>, key: &str) -> Result<T
 }
 
 impl WeightsInfo {
-    // Builds complete `WeightsInfo` (all 28 layers and all fields) from metadata keys.
     fn new(mut tensors: HashMap<String, TensorInfo>) -> Result<Self, Error> {
         let embed_tokens_weight = take_tensor(&mut tensors, "model.embed_tokens.weight")?;
         let norm_weight = take_tensor(&mut tensors, "model.norm.weight")?;
