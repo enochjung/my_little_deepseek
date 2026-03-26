@@ -43,6 +43,12 @@ impl Error {
             kind: ErrorKind::InvalidChar { codepoint },
         }
     }
+
+    pub fn empty_token_ids() -> Self {
+        Self {
+            kind: ErrorKind::EmptyTokenIds,
+        }
+    }
 }
 
 impl std::error::Error for Error {}
@@ -60,6 +66,7 @@ pub enum ErrorKind {
     UnknownFormat { path: String },
     DataNotProvided { name: String },
     InvalidChar { codepoint: u32 },
+    EmptyTokenIds,
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -72,6 +79,7 @@ impl std::fmt::Display for ErrorKind {
             Self::UnknownFormat { path } => write!(f, "unknown {path} format"),
             Self::DataNotProvided { name } => write!(f, "{name} data not provided"),
             Self::InvalidChar { codepoint } => write!(f, "invalid character: U+{:04X}", codepoint),
+            Self::EmptyTokenIds => write!(f, "empty token ids"),
         }
     }
 }

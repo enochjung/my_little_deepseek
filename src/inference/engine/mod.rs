@@ -10,7 +10,7 @@ pub struct InferenceEngine<'a> {
     _model_data: &'a ModelData,
     tokens: Vec<u32>,
     tokenizer_engine: TokenizerEngine<'a>,
-    _embedding_engine: EmbeddingEngine<'a>,
+    embedding_engine: EmbeddingEngine<'a>,
 }
 
 impl<'a> InferenceEngine<'a> {
@@ -23,7 +23,7 @@ impl<'a> InferenceEngine<'a> {
             _model_data: model_data,
             tokens,
             tokenizer_engine,
-            _embedding_engine: embedding_engine,
+            embedding_engine,
         })
     }
 
@@ -40,8 +40,11 @@ impl<'a> InferenceEngine<'a> {
         self.tokens.push(special_token::THINK_START);
 
         // do
-        // - run decoder with tokens
-        // - select token
+        {
+            let _embedded_tensor = self.embedding_engine.embed(&self.tokens)?;
+            // - run decoder with tokens
+            // - select token
+        }
         // until eos
 
         // return generated tokens with pretty format
