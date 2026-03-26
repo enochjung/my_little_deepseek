@@ -1,25 +1,29 @@
+mod embedding;
 mod special_token;
 mod tokenizer;
 
 use super::{Error, ModelData};
+use embedding::EmbeddingEngine;
 use tokenizer::TokenizerEngine;
 
 pub struct InferenceEngine<'a> {
-    #[allow(unused)]
-    model_data: &'a ModelData,
+    _model_data: &'a ModelData,
     tokens: Vec<u32>,
     tokenizer_engine: TokenizerEngine<'a>,
+    _embedding_engine: EmbeddingEngine<'a>,
 }
 
 impl<'a> InferenceEngine<'a> {
     pub fn new(model_data: &'a ModelData) -> Result<Self, Error> {
         let tokens = Vec::new();
         let tokenizer_engine = TokenizerEngine::new(model_data)?;
+        let embedding_engine = EmbeddingEngine::new(model_data)?;
 
         Ok(Self {
-            model_data,
+            _model_data: model_data,
             tokens,
             tokenizer_engine,
+            _embedding_engine: embedding_engine,
         })
     }
 

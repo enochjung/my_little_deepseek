@@ -5,11 +5,13 @@ use std::{collections::HashMap, ops::Range};
 
 const NUM_LAYER: usize = 28;
 
+#[allow(unused)]
 pub struct TensorInfo {
     pub shape: Vec<u32>,
     pub offset: Range<u64>,
 }
 
+#[allow(unused)]
 pub struct LayerInfo {
     pub input_layernorm_weight: TensorInfo,
     pub q_proj_bias: TensorInfo,
@@ -25,14 +27,14 @@ pub struct LayerInfo {
     pub down_proj_weight: TensorInfo,
 }
 
-pub struct WeightsInfo {
+#[allow(unused)]
+pub struct WeightInfo {
     pub embed_tokens_weight: TensorInfo,
     pub layers: [LayerInfo; NUM_LAYER],
     pub norm_weight: TensorInfo,
     pub lm_head_weight: TensorInfo,
 }
 
-#[allow(unused)]
 pub struct WeightText {
     path: String,
     mmap: utils::Mmap,
@@ -50,9 +52,8 @@ impl WeightText {
     }
 }
 
-#[allow(unused)]
 impl Text for WeightText {
-    type Output<'a> = (WeightsInfo, &'a [u16]);
+    type Output<'a> = (WeightInfo, &'a [u8]);
 
     fn parse(&self) -> Result<Self::Output<'_>, Error> {
         let raw = self.mmap.as_slice();
@@ -60,14 +61,11 @@ impl Text for WeightText {
 
         let header = &raw[header_range];
         let tensors = parse_header(header, &self.path)?;
+        let weight_info = WeightInfo::new(tensors)?;
 
-        let weights_info = WeightsInfo::new(tensors)?;
-        let payload_u16 = self
-            .mmap
-            .get_u16_slice(payload_range)
-            .ok_or_else(|| Error::broken_data(&self.path, 0))?;
+        let payload = &raw[payload_range.start..payload_range.end];
 
-        Ok((weights_info, payload_u16))
+        Ok((weight_info, payload))
     }
 }
 
@@ -107,7 +105,7 @@ fn take_tensor(tensors: &mut HashMap<String, TensorInfo>, key: &str) -> Result<T
         .ok_or_else(|| Error::data_not_provided(key))
 }
 
-impl WeightsInfo {
+impl WeightInfo {
     fn new(mut tensors: HashMap<String, TensorInfo>) -> Result<Self, Error> {
         let embed_tokens_weight = take_tensor(&mut tensors, "model.embed_tokens.weight")?;
         let norm_weight = take_tensor(&mut tensors, "model.norm.weight")?;
@@ -168,7 +166,7 @@ impl WeightsInfo {
         }
         let layers: [LayerInfo; NUM_LAYER] = layers_vec
             .try_into()
-            .map_err(|_| Error::broken_data("weights", 0))?;
+            .map_err(|_| Error::broken_data("weight", 0))?;
 
         Ok(Self {
             embed_tokens_weight,
@@ -179,8 +177,8 @@ impl WeightsInfo {
     }
 }
 
-#[allow(unused)]
 pub struct WeightBinary {
+    #[allow(unused)]
     path: String,
     mmap: utils::Mmap,
 }
@@ -198,6 +196,7 @@ impl WeightBinary {
 }
 
 impl Binary for WeightBinary {
+    #[allow(unused)]
     fn raw(&self) -> Result<&[u8], Error> {
         Ok(self.mmap.as_slice())
     }
@@ -549,5 +548,149 @@ impl<'a> HeaderParser<'a> {
 
     fn peek_byte(&self) -> Option<u8> {
         self.text.get(self.idx).copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WEIGHT_PATH: &'static str = "model/model.safetensors";
+
+    fn assert(tensor_info: &TensorInfo, expected_shape: &[u32], expected_offset: Range<u64>) {
+        assert_eq!(
+            tensor_info.shape, expected_shape,
+            "actual: {:?}, expected: {:?}",
+            tensor_info.shape, expected_shape
+        );
+        assert_eq!(
+            tensor_info.offset, expected_offset,
+            "actual: {:?}, expected: {:?}",
+            tensor_info.offset, expected_offset
+        );
+    }
+
+    fn build_weight_info() -> WeightInfo {
+        let weight_text =
+            WeightText::new(WEIGHT_PATH).expect("initializing weight text should secceed");
+        let (weight_info, _) = weight_text.parse().expect("parsing should secceed");
+
+        weight_info
+    }
+
+    #[test]
+    fn case01_text_embed_tokens_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.embed_tokens_weight,
+            &[151936, 1536],
+            0..466747392,
+        );
+    }
+
+    #[test]
+    fn case02_text_q_proj_bias() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[0].q_proj_bias,
+            &[1536],
+            466747392..466750464,
+        );
+    }
+
+    #[test]
+    fn case03_text_k_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[1].k_proj_weight,
+            &[256, 1536],
+            565065728..565852160,
+        );
+    }
+
+    #[test]
+    fn case04_text_v_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[2].v_proj_weight,
+            &[256, 1536],
+            659447808..660234240,
+        );
+    }
+
+    #[test]
+    fn case05_text_o_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[3].o_proj_weight,
+            &[1536, 1536],
+            753829888..758548480,
+        );
+    }
+
+    #[test]
+    fn case06_text_gate_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[4].gate_proj_weight,
+            &[8960, 1536],
+            852144128..879669248,
+        );
+    }
+
+    #[test]
+    fn case07_text_up_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[5].up_proj_weight,
+            &[8960, 1536],
+            973264896..1000790016,
+        );
+    }
+
+    #[test]
+    fn case08_text_down_proj_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[6].down_proj_weight,
+            &[1536, 8960],
+            1094385664..1121910784,
+        );
+    }
+
+    #[test]
+    fn case09_text_input_layernorm_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[7].input_layernorm_weight,
+            &[1536],
+            1215506432..1215509504,
+        );
+    }
+
+    #[test]
+    fn case10_text_post_attention_layernorm_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.layers[27].post_attention_layernorm_weight,
+            &[1536],
+            3087422464..3087425536,
+        );
+    }
+
+    #[test]
+    fn case11_text_norm_weight() {
+        let weight_info = build_weight_info();
+        assert(&weight_info.norm_weight, &[1536], 3087425536..3087428608);
+    }
+
+    #[test]
+    fn case12_text_lm_head_weight() {
+        let weight_info = build_weight_info();
+        assert(
+            &weight_info.lm_head_weight,
+            &[151936, 1536],
+            3087428608..3554176000,
+        );
     }
 }

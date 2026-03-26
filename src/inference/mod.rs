@@ -1,11 +1,10 @@
 mod data;
 mod engine;
 mod error;
+mod tensor;
 mod utils;
 
-#[allow(unused)]
 pub use data::ModelData;
-#[allow(unused)]
 pub use engine::InferenceEngine;
-#[allow(unused)]
 pub use error::Error;
+pub use tensor::Tensor;

@@ -6,8 +6,7 @@ use merge::MergeEngine;
 use vocab::VocabEngine;
 
 pub struct ModelEngine<'a> {
-    #[allow(unused)]
-    model_data: &'a ModelData,
+    _model_data: &'a ModelData,
     merge_engine: MergeEngine<'a>,
     vocab_engine: VocabEngine<'a>,
 }
@@ -18,7 +17,7 @@ impl<'a> ModelEngine<'a> {
         let vocab_engine = VocabEngine::new(model_data)?;
 
         Ok(Self {
-            model_data,
+            _model_data: model_data,
             merge_engine,
             vocab_engine,
         })
@@ -47,16 +46,22 @@ mod tests {
     const MERGE_PATH: &'static str = "model/merges.json";
     const VOCAB_PATH: &'static str = "model/vocab.json";
 
-    fn assert_encoding(input: &[Vec<String>], expected: &[u32]) {
-        let model_data = ModelData::new("none.none", "none.none", MERGE_PATH, VOCAB_PATH)
-            .expect("Error occured at initializing data");
+    fn assert(input: &[Vec<String>], expected: &[u32]) {
+        let model_data = ModelData::new(
+            "none.none",
+            "none.none",
+            MERGE_PATH,
+            VOCAB_PATH,
+            "none.none",
+        )
+        .expect("initializing data should succeed");
         let model_engine =
-            ModelEngine::new(&model_data).expect("Error occured at initializing tokenizer model");
-        let encoded = model_engine.encode(input).expect("Error occured at encode");
+            ModelEngine::new(&model_data).expect("initializing model should succeed");
+        let actual = model_engine.encode(input).expect("encoding should succeed");
         assert_eq!(
-            encoded, expected,
-            "Encoding of {:?} failed: encoded:{:?}, expected:{:?}",
-            input, encoded, expected
+            actual, expected,
+            "actual:{:?}, expected:{:?}",
+            actual, expected
         );
     }
 
@@ -65,13 +70,13 @@ mod tests {
     }
 
     #[test]
-    fn encode_case1_hello() {
-        assert_encoding(&[tok("Hello"), tok("!")], &vec![9707, 0]);
+    fn case01_hello() {
+        assert(&[tok("Hello"), tok("!")], &[9707, 0]);
     }
 
     #[test]
-    fn encode_case2_summarize() {
-        assert_encoding(
+    fn case02_summarize() {
+        assert(
             &[
                 tok("Summarize"),
                 tok(":"),
@@ -87,8 +92,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case3_what_is_2_plus_2() {
-        assert_encoding(
+    fn case03_what_is_2_plus_2() {
+        assert(
             &[
                 tok("What"),
                 tok("Ġis"),
@@ -104,8 +109,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case4_whitespace() {
-        assert_encoding(
+    fn case04_whitespace() {
+        assert(
             &[
                 tok("Whitespace"),
                 tok("Ġtest"),
@@ -134,8 +139,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case5_emoji() {
-        assert_encoding(
+    fn case05_emoji() {
+        assert(
             &[
                 tok("Emoji"),
                 tok("Ġtest"),
@@ -156,8 +161,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case6_json() {
-        assert_encoding(
+    fn case06_json() {
+        assert(
             &[
                 tok("Answer"),
                 tok("Ġwith"),
@@ -186,8 +191,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case7_list_primes() {
-        assert_encoding(
+    fn case07_list_primes() {
+        assert(
             &[
                 tok("List"),
                 tok("Ġthese"),
@@ -228,8 +233,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case8_code_tip() {
-        assert_encoding(
+    fn case08_code_tip() {
+        assert(
             &[
                 tok("Code"),
                 tok("Ġtip"),
@@ -247,8 +252,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case9_compute() {
-        assert_encoding(
+    fn case09_compute() {
+        assert(
             &[
                 tok("Compute"),
                 tok(":"),
@@ -274,8 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn encode_case10_python_code() {
-        assert_encoding(
+    fn case10_python_code() {
+        assert(
             &[
                 tok("Code"),
                 tok(":Ċ"),

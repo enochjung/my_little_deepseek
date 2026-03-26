@@ -4,8 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 // Hangul-specific algorithm is not implemented.
 pub struct NormalizerEngine<'a> {
-    #[allow(unused)]
-    model_data: &'a ModelData,
+    _model_data: &'a ModelData,
     decomposition_map: DecompositionMap,
     combining_class_map: CombiningClassMap,
     composition_map: CompositionMap,
@@ -46,7 +45,7 @@ impl<'a> NormalizerEngine<'a> {
         }?;
 
         Ok(Self {
-            model_data,
+            _model_data: model_data,
             decomposition_map,
             combining_class_map,
             composition_map,
@@ -182,12 +181,11 @@ impl<'a> NormalizerEngine<'a> {
     }
 }
 
-#[allow(unused)]
 fn parse_unicode_binary(
-    unicode_binary: &UnicodeBinary,
-    decomposition_map: &mut DecompositionMap,
-    combining_class_map: &mut CombiningClassMap,
-    composition_map: &mut CompositionMap,
+    _unicode_binary: &UnicodeBinary,
+    _decomposition_map: &mut DecompositionMap,
+    _combining_class_map: &mut CombiningClassMap,
+    _composition_map: &mut CompositionMap,
 ) -> Result<(), Error> {
     todo!("parsing unicode binary is not implemented yet");
 }
@@ -218,10 +216,9 @@ fn parse_unicode_text(
     Ok(())
 }
 
-#[allow(unused)]
 fn parse_exclusion_binary(
-    exclusion_binary: &ExclusionBinary,
-    exclusion_map: &mut ExclusionMap,
+    _exclusion_binary: &ExclusionBinary,
+    _exclusion_map: &mut ExclusionMap,
 ) -> Result<(), Error> {
     todo!("parsing exclusion binary is not implemented yet");
 }
@@ -329,77 +326,78 @@ mod tests {
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
     const EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
 
-    fn assert_normalized(input: &str, expected: &str) {
-        assert_ne!(
-            input.as_bytes(),
-            expected.as_bytes(),
-            "Normalization of {:?} data invalid",
-            input
-        );
-        let model_data = ModelData::new(UNICODE_PATH, EXCLUSION_PATH, "none.none", "none.none")
-            .expect("Error occured at initializing data");
+    fn assert(input: &str, expected: &str) {
+        assert_ne!(input, expected, "invalid data: {:?}", input);
+
+        let model_data = ModelData::new(
+            UNICODE_PATH,
+            EXCLUSION_PATH,
+            "none.none",
+            "none.none",
+            "none.none",
+        )
+        .expect("initializing data should succeed");
         let engine =
-            NormalizerEngine::new(&model_data).expect("Error occured at initializing normalizer");
-        let normalized = engine
+            NormalizerEngine::new(&model_data).expect("initializing normalizer should succeed");
+        let actual = engine
             .normalize(input)
-            .expect("Error occured at normalizing");
+            .expect("normalization should succeed");
         assert_eq!(
-            normalized,
+            actual,
             expected,
-            "Normalization of {:?} failed: normalized:{:?}, expected:{:?}",
-            input,
-            normalized.as_bytes(),
+            "actual:{:?}, expected:{:?}",
+            actual.as_bytes(),
             expected.as_bytes()
         );
     }
 
     #[test]
-    fn normalize_case1_latin_acute_accent() {
-        assert_normalized("cafe\u{0301}", "café");
+    fn case01_latin_acute_accent() {
+        assert("cafe\u{0301}", "café");
     }
 
     #[test]
-    fn normalize_case2_latin_combining_diacritics() {
-        assert_normalized("e\u{0301}cole", "école");
+    fn case02_latin_combining_diacritics() {
+        assert("e\u{0301}cole", "école");
     }
 
     #[test]
-    fn normalize_case3_greek_tonos() {
-        assert_normalized("Ελληνικα\u{0301}", "Ελληνικά");
+    fn case03_greek_tonos() {
+        assert("Ελληνικα\u{0301}", "Ελληνικά");
     }
 
     #[test]
-    fn normalize_case4_german_umlauts() {
-        assert_normalized("Mu\u{0308}nchen", "München");
+    fn case04_german_umlauts() {
+        assert("Mu\u{0308}nchen", "München");
     }
 
     #[test]
-    fn normalize_case5_vietnamese_tone_marks() {
-        assert_normalized("Tie\u{0302}\u{0301}ng Vie\u{0323}\u{0302}t", "Tiếng Việt");
+    fn case05_vietnamese_tone_marks() {
+        assert("Tie\u{0302}\u{0301}ng Vie\u{0323}\u{0302}t", "Tiếng Việt");
     }
 
     #[test]
-    fn normalize_case6_devanagari_combining() {
-        assert_normalized("A\u{030A}", "Å");
+    fn case06_devanagari_combining() {
+        assert("A\u{030A}", "Å");
     }
 
     #[test]
-    fn normalize_case7_arabic_diacritics() {
-        assert_normalized("السَّلَام", "السَّلَام");
+    fn case07_arabic_diacritics() {
+        assert("السَّلَام", "السَّلَام");
     }
 
     #[test]
-    fn normalize_case8_hebrew_combining_marks() {
-        assert_normalized("שָׁלוֹם", "שָׁלוֹם");
+    fn case08_hebrew_combining_marks() {
+        assert("שָׁלוֹם", "שָׁלוֹם");
     }
 
     #[test]
-    fn normalize_case9_latin_ligatures() {
-        assert_normalized("\u{212B}", "Å");
+    fn case09_latin_ligatures() {
+        assert("\u{212B}", "Å");
     }
 
     #[test]
-    fn normalize_case10_mixed_composed_characters() {
-        assert_normalized("Cafe\u{0301}: n\u{0303}on\u{0303}o", "Café: ñoño");
+    fn case10_mixed_composed_characters() {
+        assert("Cafe\u{0301}: n\u{0303}on\u{0303}o", "Café: ñoño");
     }
 }

@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::ops::Range;
 use std::os::fd::AsRawFd;
 
 pub struct Mmap {
@@ -44,24 +43,6 @@ impl Mmap {
         }
 
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-    }
-
-    pub fn get_u16_slice(&self, range: Range<usize>) -> Option<&[u16]> {
-        if range.start > range.end || range.end > self.len {
-            return None;
-        }
-
-        let byte_len = range.end - range.start;
-        if byte_len % 2 != 0 {
-            return None;
-        }
-
-        let ptr = self.ptr.wrapping_add(range.start);
-        if (ptr as usize) % std::mem::align_of::<u16>() != 0 {
-            return None;
-        }
-
-        Some(unsafe { std::slice::from_raw_parts(ptr as *const u16, byte_len / 2) })
     }
 }
 

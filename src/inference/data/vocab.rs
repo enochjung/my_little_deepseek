@@ -64,8 +64,8 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, u32), Err
     Ok((text, id))
 }
 
-#[allow(unused)]
 pub struct VocabBinary {
+    #[allow(unused)]
     path: String,
     mmap: utils::Mmap,
 }
@@ -82,6 +82,7 @@ impl VocabBinary {
     }
 }
 
+#[allow(unused)]
 impl Binary for VocabBinary {
     fn raw(&self) -> Result<&[u8], Error> {
         Ok(self.mmap.as_slice())

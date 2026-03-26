@@ -244,26 +244,24 @@ fn char_at(input: &str, idx: usize) -> Option<char> {
 mod tests {
     use super::SplitEngine;
 
-    fn assert_slices(input: &str, expected: &[&str]) {
-        let engine = SplitEngine::new().unwrap();
-        let slices = engine
-            .pretokenize(input)
-            .expect("split pretokenize should succeed");
+    fn assert(input: &str, expected: &[&str]) {
+        let engine = SplitEngine::new().expect("initializing split should succeed");
+        let actual = engine.pretokenize(input).expect("splitting should succeed");
         assert_eq!(
-            slices, expected,
-            "Pretokenizing of {:?} failed: pretokenized:{:?}, expected:{:?}",
-            input, slices, expected
+            actual, expected,
+            "actual:{:?}, expected:{:?}",
+            actual, expected
         );
     }
 
     #[test]
-    fn split_case1_hello() {
-        assert_slices("Hello!", &["Hello", "!"]);
+    fn case01_hello() {
+        assert("Hello!", &["Hello", "!"]);
     }
 
     #[test]
-    fn split_case2_summarize() {
-        assert_slices(
+    fn case02_summarize() {
+        assert(
             "Summarize: Rust ownership prevents data races.",
             &[
                 "Summarize",
@@ -279,16 +277,16 @@ mod tests {
     }
 
     #[test]
-    fn split_case3_math_question() {
-        assert_slices(
+    fn case03_math_question() {
+        assert(
             "What is 2 + 2?",
             &["What", " is", " ", "2", " +", " ", "2", "?"],
         );
     }
 
     #[test]
-    fn split_case4_whitespace() {
-        assert_slices(
+    fn case04_whitespace() {
+        assert(
             "Whitespace test:  keep   multiple spaces, tabs\t, and blank lines\n\nend.",
             &[
                 "Whitespace",
@@ -314,8 +312,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case5_emoji() {
-        assert_slices(
+    fn case05_emoji() {
+        assert(
             "Emoji test: cats 😺 rockets 🚀 and sparkles ✨.",
             &[
                 "Emoji",
@@ -333,8 +331,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case6_json() {
-        assert_slices(
+    fn case06_json() {
+        assert(
             "Answer with JSON: { \"name\": \"Alice\", \"age\": 27 }",
             &[
                 "Answer", " with", " JSON", ":", " {", " \"", "name", "\":", " \"", "Alice", "\",",
@@ -344,8 +342,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case7_list_numbers() {
-        assert_slices(
+    fn case07_list_numbers() {
+        assert(
             "List these: 2, 3, 5, 7, 11, 13, 17, 19",
             &[
                 "List", " these", ":", " ", "2", ",", " ", "3", ",", " ", "5", ",", " ", "7", ",",
@@ -355,8 +353,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case8_code_tip() {
-        assert_slices(
+    fn case08_code_tip() {
+        assert(
             "Code tip: avoid unwrap() in production Rust.",
             &[
                 "Code",
@@ -374,8 +372,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case9_compute() {
-        assert_slices(
+    fn case09_compute() {
+        assert(
             "Compute: 127 * 43 = 5461",
             &[
                 "Compute", ":", " ", "1", "2", "7", " *", " ", "4", "3", " =", " ", "5", "4", "6",
@@ -385,8 +383,8 @@ mod tests {
     }
 
     #[test]
-    fn split_case10_python_block() {
-        assert_slices(
+    fn case10_python_block() {
+        assert(
             "Code:\n```python\nfor i in range(3):\n    print(i)\n```",
             &[
                 "Code", ":\n", "```", "python", "\n", "for", " i", " in", " range", "(", "3",

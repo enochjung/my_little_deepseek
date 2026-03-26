@@ -2,12 +2,13 @@ mod exclusion;
 mod merge;
 mod unicode;
 mod vocab;
-mod weights;
+mod weight;
 
 pub use exclusion::{ExclusionBinary, ExclusionText};
 pub use merge::{MergeBinary, MergeText};
 pub use unicode::{UnicodeBinary, UnicodeText};
 pub use vocab::{VocabBinary, VocabText};
+pub use weight::{WeightBinary, WeightText};
 
 use super::Error;
 use std::path::Path;
@@ -21,6 +22,10 @@ pub struct ModelData {
     pub merge_binary: Option<MergeBinary>,
     pub vocab_text: Option<VocabText>,
     pub vocab_binary: Option<VocabBinary>,
+    #[allow(unused)]
+    pub weight_text: Option<WeightText>,
+    #[allow(unused)]
+    pub weight_binary: Option<WeightBinary>,
 }
 
 pub trait Text {
@@ -31,8 +36,8 @@ pub trait Text {
     fn parse(&self) -> Result<Self::Output<'_>, Error>;
 }
 
-#[allow(unused)]
 pub trait Binary {
+    #[allow(unused)]
     fn raw(&self) -> Result<&[u8], Error>;
 }
 
@@ -42,6 +47,7 @@ impl ModelData {
         exclusion_path: &str,
         merge_path: &str,
         vocab_path: &str,
+        weight_path: &str,
     ) -> Result<Self, Error> {
         let (unicode_text, unicode_binary) = match Path::new(unicode_path)
             .extension()
@@ -83,6 +89,16 @@ impl ModelData {
             _ => return Err(Error::unknown_format(vocab_path)),
         };
 
+        let (weight_text, weight_binary) = match Path::new(weight_path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+        {
+            Some("safetensors") => (Some(WeightText::new(weight_path)?), None),
+            Some("bin") => (None, Some(WeightBinary::new(weight_path)?)),
+            Some("none") => (None, None),
+            _ => return Err(Error::unknown_format(weight_path)),
+        };
+
         Ok(Self {
             unicode_text,
             unicode_binary,
@@ -92,6 +108,8 @@ impl ModelData {
             merge_binary,
             vocab_text,
             vocab_binary,
+            weight_text,
+            weight_binary,
         })
     }
 }

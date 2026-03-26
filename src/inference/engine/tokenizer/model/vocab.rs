@@ -3,8 +3,7 @@ use crate::inference::data::*;
 use std::collections::HashMap;
 
 pub struct VocabEngine<'a> {
-    #[allow(unused)]
-    model_data: &'a ModelData,
+    _model_data: &'a ModelData,
     vocab_map: VocabMap,
 }
 
@@ -19,7 +18,7 @@ impl<'a> VocabEngine<'a> {
         }?;
 
         Ok(Self {
-            model_data,
+            _model_data: model_data,
             vocab_map,
         })
     }
@@ -32,8 +31,7 @@ impl<'a> VocabEngine<'a> {
     }
 }
 
-#[allow(unused)]
-fn parse_vocab_binary(vocab_binary: &VocabBinary, vocab_map: &mut VocabMap) -> Result<(), Error> {
+fn parse_vocab_binary(_vocab_binary: &VocabBinary, _vocab_map: &mut VocabMap) -> Result<(), Error> {
     todo!("parsing vocab binary is not implemented yet");
 }
 

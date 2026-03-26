@@ -70,8 +70,8 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, String), 
     Ok((left, right))
 }
 
-#[allow(unused)]
 pub struct MergeBinary {
+    #[allow(unused)]
     path: String,
     mmap: utils::Mmap,
 }
@@ -88,6 +88,7 @@ impl MergeBinary {
     }
 }
 
+#[allow(unused)]
 impl Binary for MergeBinary {
     fn raw(&self) -> Result<&[u8], Error> {
         Ok(self.mmap.as_slice())

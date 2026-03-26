@@ -46,32 +46,37 @@ mod tests {
         s.chars().map(|c| c.to_string()).collect()
     }
 
-    #[test]
-    fn pretokenize_case1_hello() {
-        let engine = ByteLevelEngine::new().unwrap();
+    fn assert(input: &[&str], expected: &[Vec<String>]) {
+        let engine = ByteLevelEngine::new().expect("initializing byte-level should succeed");
+        let actual = engine
+            .pretokenize(input)
+            .expect("byte-level pretokenization should succeed");
         assert_eq!(
-            engine.pretokenize(&["Hello", "!"]).unwrap(),
-            vec![tok("Hello"), tok("!")]
+            actual, expected,
+            "actual: {:?}, expected: {:?}",
+            actual, expected
         );
     }
 
     #[test]
-    fn pretokenize_case2_summarize() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Summarize",
-                    ":",
-                    " Rust",
-                    " ownership",
-                    " prevents",
-                    " data",
-                    " races",
-                    "."
-                ])
-                .unwrap(),
-            vec![
+    fn case01_hello() {
+        assert(&["Hello", "!"], &[tok("Hello"), tok("!")]);
+    }
+
+    #[test]
+    fn case02_summarize() {
+        assert(
+            &[
+                "Summarize",
+                ":",
+                " Rust",
+                " ownership",
+                " prevents",
+                " data",
+                " races",
+                ".",
+            ],
+            &[
                 tok("Summarize"),
                 tok(":"),
                 tok("ĠRust"),
@@ -85,13 +90,10 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case3_what_is_2_plus_2() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&["What", " is", " ", "2", " +", " ", "2", "?"])
-                .unwrap(),
-            vec![
+    fn case03_what_is_2_plus_2() {
+        assert(
+            &["What", " is", " ", "2", " +", " ", "2", "?"],
+            &[
                 tok("What"),
                 tok("Ġis"),
                 tok("Ġ"),
@@ -105,32 +107,29 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case4_whitespace() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Whitespace",
-                    " test",
-                    ":",
-                    " ",
-                    " keep",
-                    "  ",
-                    " multiple",
-                    " spaces",
-                    ",",
-                    " tabs",
-                    "\t",
-                    ",",
-                    " and",
-                    " blank",
-                    " lines",
-                    "\n\n",
-                    "end",
-                    ".",
-                ])
-                .unwrap(),
-            vec![
+    fn case04_whitespace() {
+        assert(
+            &[
+                "Whitespace",
+                " test",
+                ":",
+                " ",
+                " keep",
+                "  ",
+                " multiple",
+                " spaces",
+                ",",
+                " tabs",
+                "\t",
+                ",",
+                " and",
+                " blank",
+                " lines",
+                "\n\n",
+                "end",
+                ".",
+            ],
+            &[
                 tok("Whitespace"),
                 tok("Ġtest"),
                 tok(":"),
@@ -154,24 +153,21 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case5_emoji() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Emoji",
-                    " test",
-                    ":",
-                    " cats",
-                    " 😺",
-                    " rockets",
-                    " 🚀",
-                    " and",
-                    " sparkles",
-                    " ✨.",
-                ])
-                .unwrap(),
-            vec![
+    fn case05_emoji() {
+        assert(
+            &[
+                "Emoji",
+                " test",
+                ":",
+                " cats",
+                " 😺",
+                " rockets",
+                " 🚀",
+                " and",
+                " sparkles",
+                " ✨.",
+            ],
+            &[
                 tok("Emoji"),
                 tok("Ġtest"),
                 tok(":"),
@@ -187,16 +183,13 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case6_json() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Answer", " with", " JSON", ":", " {", " \"", "name", "\":", " \"", "Alice",
-                    "\",", " \"", "age", "\":", " ", "2", "7", " }",
-                ])
-                .unwrap(),
-            vec![
+    fn case06_json() {
+        assert(
+            &[
+                "Answer", " with", " JSON", ":", " {", " \"", "name", "\":", " \"", "Alice", "\",",
+                " \"", "age", "\":", " ", "2", "7", " }",
+            ],
+            &[
                 tok("Answer"),
                 tok("Ġwith"),
                 tok("ĠJSON"),
@@ -220,16 +213,13 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case7_list_primes() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "List", " these", ":", " ", "2", ",", " ", "3", ",", " ", "5", ",", " ", "7",
-                    ",", " ", "1", "1", ",", " ", "1", "3", ",", " ", "1", "7", ",", " ", "1", "9",
-                ])
-                .unwrap(),
-            vec![
+    fn case07_list_primes() {
+        assert(
+            &[
+                "List", " these", ":", " ", "2", ",", " ", "3", ",", " ", "5", ",", " ", "7", ",",
+                " ", "1", "1", ",", " ", "1", "3", ",", " ", "1", "7", ",", " ", "1", "9",
+            ],
+            &[
                 tok("List"),
                 tok("Ġthese"),
                 tok(":"),
@@ -265,24 +255,21 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case8_code_tip() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Code",
-                    " tip",
-                    ":",
-                    " avoid",
-                    " unwrap",
-                    "()",
-                    " in",
-                    " production",
-                    " Rust",
-                    "."
-                ])
-                .unwrap(),
-            vec![
+    fn case08_code_tip() {
+        assert(
+            &[
+                "Code",
+                " tip",
+                ":",
+                " avoid",
+                " unwrap",
+                "()",
+                " in",
+                " production",
+                " Rust",
+                ".",
+            ],
+            &[
                 tok("Code"),
                 tok("Ġtip"),
                 tok(":"),
@@ -298,16 +285,13 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case9_compute() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Compute", ":", " ", "1", "2", "7", " *", " ", "4", "3", " =", " ", "5", "4",
-                    "6", "1",
-                ])
-                .unwrap(),
-            vec![
+    fn case09_compute() {
+        assert(
+            &[
+                "Compute", ":", " ", "1", "2", "7", " *", " ", "4", "3", " =", " ", "5", "4", "6",
+                "1",
+            ],
+            &[
                 tok("Compute"),
                 tok(":"),
                 tok("Ġ"),
@@ -329,16 +313,13 @@ mod tests {
     }
 
     #[test]
-    fn pretokenize_case10_python_code() {
-        let engine = ByteLevelEngine::new().unwrap();
-        assert_eq!(
-            engine
-                .pretokenize(&[
-                    "Code", ":\n", "```", "python", "\n", "for", " i", " in", " range", "(", "3",
-                    "):\n", "   ", " print", "(i", ")\n", "```",
-                ])
-                .unwrap(),
-            vec![
+    fn case10_python_code() {
+        assert(
+            &[
+                "Code", ":\n", "```", "python", "\n", "for", " i", " in", " range", "(", "3",
+                "):\n", "   ", " print", "(i", ")\n", "```",
+            ],
+            &[
                 tok("Code"),
                 tok(":Ċ"),
                 tok("```"),
