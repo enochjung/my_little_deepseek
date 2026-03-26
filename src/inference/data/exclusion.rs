@@ -34,8 +34,8 @@ impl Text for ExclusionText {
     }
 }
 
-#[allow(unused)]
 pub struct ExclusionBinary {
+    #[allow(unused)]
     path: String,
     mmap: utils::Mmap,
 }
@@ -52,6 +52,7 @@ impl ExclusionBinary {
     }
 }
 
+#[allow(unused)]
 impl Binary for ExclusionBinary {
     fn raw(&self) -> Result<&[u8], Error> {
         Ok(self.mmap.as_slice())

@@ -66,8 +66,8 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<UnicodeLine, Error
     })
 }
 
-#[allow(unused)]
 pub struct UnicodeBinary {
+    #[allow(unused)]
     path: String,
     mmap: utils::Mmap,
 }
@@ -84,6 +84,7 @@ impl UnicodeBinary {
     }
 }
 
+#[allow(unused)]
 impl Binary for UnicodeBinary {
     fn raw(&self) -> Result<&[u8], Error> {
         Ok(self.mmap.as_slice())

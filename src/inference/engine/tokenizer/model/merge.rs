@@ -3,8 +3,7 @@ use crate::inference::data::*;
 use std::collections::{HashMap, LinkedList};
 
 pub struct MergeEngine<'a> {
-    #[allow(unused)]
-    model_data: &'a ModelData,
+    _model_data: &'a ModelData,
     merge_map: MergeMap,
 }
 
@@ -19,7 +18,7 @@ impl<'a> MergeEngine<'a> {
         }?;
 
         Ok(Self {
-            model_data,
+            _model_data: model_data,
             merge_map,
         })
     }
@@ -66,8 +65,7 @@ impl<'a> MergeEngine<'a> {
     }
 }
 
-#[allow(unused)]
-fn parse_merge_binary(merge_binary: &MergeBinary, merge_map: &mut MergeMap) -> Result<(), Error> {
+fn parse_merge_binary(_merge_binary: &MergeBinary, _merge_map: &mut MergeMap) -> Result<(), Error> {
     todo!("parsing merge binary is not implemented yet");
 }
 
