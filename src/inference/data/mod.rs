@@ -8,6 +8,7 @@ pub use exclusion::{ExclusionBinary, ExclusionText};
 pub use merge::{MergeBinary, MergeText};
 pub use unicode::{UnicodeBinary, UnicodeText};
 pub use vocab::{VocabBinary, VocabText};
+#[allow(unused)]
 pub use weight::{TensorInfo, WeightBinary, WeightText};
 
 use super::Error;

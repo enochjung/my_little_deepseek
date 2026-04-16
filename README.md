@@ -42,10 +42,10 @@ src/                             # Rust source root
 │   │   ├── vocab.rs
 │   │   └── weight.rs
 │   ├── engine/                  # Inference orchestration layer
-│   │   ├── decoder/
+│   │   ├── attention/
 │   │   ├── embedding/
-│   │   │   └── mod.rs
 │   │   ├── lm_head/
+│   │   ├── normalization/
 │   │   ├── tokenizer/           # Tokenizer pipeline
 │   │   │   ├── model/           # Vocab + merge encoding
 │   │   │   │   ├── merge.rs
@@ -61,7 +61,8 @@ src/                             # Rust source root
 │   │   ├── mod.rs
 │   │   └── special_token.rs
 │   ├── tensor/
-│   │   └── mod.rs
+│   │   ├── mod.rs
+│   │   └── operable.rs
 │   ├── utils/                   # Shared low-level helpers
 │   │   ├── mmap.rs
 │   │   └── mod.rs

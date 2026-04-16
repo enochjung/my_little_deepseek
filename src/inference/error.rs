@@ -44,9 +44,9 @@ impl Error {
         }
     }
 
-    pub fn empty_token_ids() -> Self {
+    pub fn shape_mismatch(expected: usize, actual: usize) -> Self {
         Self {
-            kind: ErrorKind::EmptyTokenIds,
+            kind: ErrorKind::ShapeMismatch { expected, actual },
         }
     }
 }
@@ -66,7 +66,7 @@ pub enum ErrorKind {
     UnknownFormat { path: String },
     DataNotProvided { name: String },
     InvalidChar { codepoint: u32 },
-    EmptyTokenIds,
+    ShapeMismatch { expected: usize, actual: usize },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -79,7 +79,12 @@ impl std::fmt::Display for ErrorKind {
             Self::UnknownFormat { path } => write!(f, "unknown {path} format"),
             Self::DataNotProvided { name } => write!(f, "{name} data not provided"),
             Self::InvalidChar { codepoint } => write!(f, "invalid character: U+{:04X}", codepoint),
-            Self::EmptyTokenIds => write!(f, "empty token ids"),
+            Self::ShapeMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "shape mismatch: expected {expected} bytes, got {actual} bytes"
+                )
+            }
         }
     }
 }
