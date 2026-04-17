@@ -1,4 +1,4 @@
-use super::{Error, F32, F32_BYTES, HostMemory, Tensor};
+use super::{DataType, Error, F32, HostMemory, Tensor};
 
 #[allow(unused)]
 const RMS_NORM_EPSILON_F32: f32 = 1e-6;
@@ -43,7 +43,7 @@ impl UnaryOperable for Tensor<F32, HostMemory> {
     }
 
     fn silu(&mut self) -> () {
-        let n = self.storage.data.len() / F32_BYTES;
+        let n = self.storage.data.len() / F32::BYTES;
         let ptr = self.storage.data.as_mut_ptr().cast::<f32>();
         let data = unsafe { core::slice::from_raw_parts_mut(ptr, n) };
 

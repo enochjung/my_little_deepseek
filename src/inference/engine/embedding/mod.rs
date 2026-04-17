@@ -1,4 +1,3 @@
-mod rotary_position_embedding;
 mod word_embedding;
 
 use crate::inference::{Error, ModelData, tensor};

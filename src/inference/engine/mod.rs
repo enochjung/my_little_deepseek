@@ -4,6 +4,7 @@ mod tokenizer;
 
 use super::{Error, ModelData, tensor};
 use embedding::EmbeddingEngine;
+use tensor::{F32, HostMemory, Tensor};
 use tokenizer::TokenizerEngine;
 
 pub struct InferenceEngine<'a> {
@@ -39,14 +40,18 @@ impl<'a> InferenceEngine<'a> {
         self.tokens.push(special_token::ASSISTANT);
         self.tokens.push(special_token::THINK_START);
 
-        // TODO: Architect Tensor API.
+        let mut embedded_tensor =
+            Tensor::<F32, HostMemory>::with_capacity(self.tokens.len() * 1536, [0, 1536])?;
+
+        // word embedding
+        //// (model.embed_tokens.weight)
+        for token_id in self.tokens.iter() {
+            let tensor = self.embedding_engine.word_embed(*token_id)?;
+            embedded_tensor.append(&tensor)?;
+        }
 
         // do
         {
-            // word embedding
-            //// (model.embed_tokens.weight)
-            let _embedded_tensor = self.embedding_engine.word_embed(self.tokens[0])?;
-
             // for each layer [0, 28)
             {
                 // input rms norm
@@ -99,6 +104,8 @@ impl<'a> InferenceEngine<'a> {
             // rms norm (model.norm.weight)
 
             // lm head (lm_head.weight)
+
+            // append embedding if not finished
         }
         // until eos
 

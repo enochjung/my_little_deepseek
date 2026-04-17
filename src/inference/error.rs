@@ -49,6 +49,12 @@ impl Error {
             kind: ErrorKind::ShapeMismatch { expected, actual },
         }
     }
+
+    pub fn out_of_bound(index: usize, limit: usize) -> Self {
+        Self {
+            kind: ErrorKind::OutOfBound { index, limit },
+        }
+    }
 }
 
 impl std::error::Error for Error {}
@@ -67,6 +73,7 @@ pub enum ErrorKind {
     DataNotProvided { name: String },
     InvalidChar { codepoint: u32 },
     ShapeMismatch { expected: usize, actual: usize },
+    OutOfBound { index: usize, limit: usize },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -84,6 +91,9 @@ impl std::fmt::Display for ErrorKind {
                     f,
                     "shape mismatch: expected {expected} bytes, got {actual} bytes"
                 )
+            }
+            Self::OutOfBound { index, limit } => {
+                write!(f, "out of bound: index {index}, limit {limit}")
             }
         }
     }
