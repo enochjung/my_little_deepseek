@@ -2,15 +2,16 @@ mod embedding;
 mod special_token;
 mod tokenizer;
 
-use super::{Error, ModelData};
+use super::{Error, ModelData, tensor};
 use embedding::EmbeddingEngine;
+use tensor::{F32, HostMemory, Tensor};
 use tokenizer::TokenizerEngine;
 
 pub struct InferenceEngine<'a> {
     _model_data: &'a ModelData,
     tokens: Vec<u32>,
     tokenizer_engine: TokenizerEngine<'a>,
-    embedding_engine: EmbeddingEngine<'a>,
+    embedding_engine: EmbeddingEngine<'a, tensor::F32>,
 }
 
 impl<'a> InferenceEngine<'a> {
@@ -39,11 +40,72 @@ impl<'a> InferenceEngine<'a> {
         self.tokens.push(special_token::ASSISTANT);
         self.tokens.push(special_token::THINK_START);
 
+        let mut embedded_tensor =
+            Tensor::<F32, HostMemory>::with_capacity(self.tokens.len() * 1536, [0, 1536])?;
+
+        // word embedding
+        //// (model.embed_tokens.weight)
+        for token_id in self.tokens.iter() {
+            let tensor = self.embedding_engine.word_embed(*token_id)?;
+            embedded_tensor.append(&tensor)?;
+        }
+
         // do
         {
-            let _embedded_tensor = self.embedding_engine.embed(&self.tokens)?;
-            // - run decoder with tokens
-            // - select token
+            // for each layer [0, 28)
+            {
+                // input rms norm
+                //// (model.layers.#.input_layernorm.weight)
+
+                // q k
+                //// (model.layers.#.self_attn.q_proj.bias)
+                //// (model.layers.#.self_attn.k_proj.bias)
+                //// (model.layers.#.self_attn.q_proj.weight)
+                //// (model.layers.#.self_attn.k_proj.weight)
+
+                // rope(q, k)
+
+                // v
+                //// (model.layers.#.self_attn.v_proj.bias)
+                //// (model.layers.#.self_attn.v_proj.weight)
+
+                // concat header
+
+                // output projection
+                //// (model.layers.#.self_attn.o_proj.weight)
+
+                // residual (addition)
+
+                // FeedForward(X: 1536*N) -> 1536*N
+                {
+                    // post rms norm
+                    //// (model.layers.#.post_attention_layernorm.weight)
+
+                    // input (1536*N)
+
+                    // gate : Wgate x input (8960*N)
+                    //// (model.layers.#.mlp.gate_proj.weight)
+                    // up   : Wup   x input (8960*N)
+                    //// (model.layers.#.mlp.up_proj.weight)
+
+                    // gate_silu : SiLU(gate)
+                    //// SiLU : x / (1 + e^(-x)) (element op)
+
+                    // up_proj : up * gate_silu (element-wise) (8960*N)
+
+                    // down_proj : Wdown x up_proj (1536*N)
+                    //// (model.layers.#.mlp.down_proj.weight)
+                }
+
+                // residual (addition)
+                // res := X + FeedForward(X)
+            }
+
+            // rms norm (model.norm.weight)
+
+            // lm head (lm_head.weight)
+
+            // append embedding if not finished
         }
         // until eos
 
