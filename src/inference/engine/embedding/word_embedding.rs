@@ -4,7 +4,6 @@ use crate::inference::{Error, ModelData};
 
 use tensor::{BF16, DataType, F32, HostMemory, HostMemoryRef, Tensor};
 
-#[allow(unused)]
 pub struct WordEmbeddingEngine<'a, D: DataType> {
     _model_data: &'a ModelData,
     table: Tensor<D, HostMemory>,
@@ -30,7 +29,13 @@ impl<'a> WordEmbeddingEngine<'a, F32> {
         &'b self,
         token_id: u32,
     ) -> Result<Tensor<F32, HostMemoryRef<'b>>, Error> {
-        self.table.get_row(token_id as usize)
+        let [nrow, ncol] = self.table.shape();
+        let row = token_id as usize;
+        if row >= nrow {
+            return Err(Error::out_of_bound(row, nrow));
+        }
+
+        self.table.slice(row..(row + 1), 0..ncol)
     }
 }
 
@@ -49,11 +54,9 @@ fn parse_embed_tokens_text<'a>(
     let start = embed_tokens_info.offset.start as usize;
     let end = embed_tokens_info.offset.end as usize;
     let data = &payload[start..end];
-    let shape = [
-        embed_tokens_info.shape[0] as usize, // 151936
-        embed_tokens_info.shape[1] as usize, // 1536
-    ];
-    let tensor = Tensor::<BF16, HostMemoryRef>::new(data, shape, true)?;
+    let nrow = embed_tokens_info.shape[0] as usize; // 151936
+    let ncol = embed_tokens_info.shape[1] as usize; // 1536
+    let tensor = Tensor::<BF16, HostMemoryRef>::new(data, nrow, ncol, false)?;
 
     Ok(tensor)
 }

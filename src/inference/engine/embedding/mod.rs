@@ -3,7 +3,6 @@ mod word_embedding;
 use crate::inference::{Error, ModelData, tensor};
 use word_embedding::WordEmbeddingEngine;
 
-#[allow(unused)]
 pub struct EmbeddingEngine<'a, D: tensor::DataType> {
     _model_data: &'a ModelData,
     word_embedding_engine: WordEmbeddingEngine<'a, D>,

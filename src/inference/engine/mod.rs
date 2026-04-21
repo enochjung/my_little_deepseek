@@ -1,17 +1,22 @@
 mod embedding;
+mod normalization;
 mod special_token;
 mod tokenizer;
 
 use super::{Error, ModelData, tensor};
 use embedding::EmbeddingEngine;
+use normalization::NormalizationEngine;
 use tensor::{F32, HostMemory, Tensor};
 use tokenizer::TokenizerEngine;
+
+const NUM_HIDDEN_LAYERS: usize = 28;
 
 pub struct InferenceEngine<'a> {
     _model_data: &'a ModelData,
     tokens: Vec<u32>,
     tokenizer_engine: TokenizerEngine<'a>,
     embedding_engine: EmbeddingEngine<'a, tensor::F32>,
+    normalization_engine: NormalizationEngine<'a, tensor::F32, tensor::HostMemory>,
 }
 
 impl<'a> InferenceEngine<'a> {
@@ -19,12 +24,14 @@ impl<'a> InferenceEngine<'a> {
         let tokens = Vec::new();
         let tokenizer_engine = TokenizerEngine::new(model_data)?;
         let embedding_engine = EmbeddingEngine::new(model_data)?;
+        let normalization_engine = NormalizationEngine::new(model_data)?;
 
         Ok(Self {
             _model_data: model_data,
             tokens,
             tokenizer_engine,
             embedding_engine,
+            normalization_engine,
         })
     }
 
@@ -41,7 +48,7 @@ impl<'a> InferenceEngine<'a> {
         self.tokens.push(special_token::THINK_START);
 
         let mut embedded_tensor =
-            Tensor::<F32, HostMemory>::with_capacity(self.tokens.len() * 1536, [0, 1536])?;
+            Tensor::<F32, HostMemory>::with_capacity(self.tokens.len() * 1536, 1536)?;
 
         // word embedding
         //// (model.embed_tokens.weight)
@@ -53,47 +60,58 @@ impl<'a> InferenceEngine<'a> {
         // do
         {
             // for each layer [0, 28)
-            {
-                // input rms norm
-                //// (model.layers.#.input_layernorm.weight)
+            for layer_idx in 0..NUM_HIDDEN_LAYERS {
+                // X
 
-                // q k
-                //// (model.layers.#.self_attn.q_proj.bias)
-                //// (model.layers.#.self_attn.k_proj.bias)
-                //// (model.layers.#.self_attn.q_proj.weight)
-                //// (model.layers.#.self_attn.k_proj.weight)
+                // Attention(X: N*1536) -> N*1536
+                {
+                    // input = X
+                    let mut attention_input = embedded_tensor.clone();
 
-                // rope(q, k)
+                    // input rms norm
+                    //// (model.layers.#.input_layernorm.weight)
+                    self.normalization_engine
+                        .apply_input_rms_norm(layer_idx, &mut attention_input)?;
 
-                // v
-                //// (model.layers.#.self_attn.v_proj.bias)
-                //// (model.layers.#.self_attn.v_proj.weight)
+                    // q k
+                    //// (model.layers.#.self_attn.q_proj.bias)
+                    //// (model.layers.#.self_attn.k_proj.bias)
+                    //// (model.layers.#.self_attn.q_proj.weight)
+                    //// (model.layers.#.self_attn.k_proj.weight)
 
-                // concat header
+                    // rope(q, k)
 
-                // output projection
-                //// (model.layers.#.self_attn.o_proj.weight)
+                    // v
+                    //// (model.layers.#.self_attn.v_proj.bias)
+                    //// (model.layers.#.self_attn.v_proj.weight)
+
+                    // concat header
+
+                    // output projection
+                    //// (model.layers.#.self_attn.o_proj.weight)
+                }
 
                 // residual (addition)
+                // res := X + Attention(X)
 
-                // FeedForward(X: 1536*N) -> 1536*N
+                // FeedForward(X: N*1536) -> N*1536
                 {
                     // post rms norm
                     //// (model.layers.#.post_attention_layernorm.weight)
 
-                    // input (1536*N)
+                    // input (N*1536)
 
-                    // gate : Wgate x input (8960*N)
+                    // gate : Wgate x input (N*8960)
                     //// (model.layers.#.mlp.gate_proj.weight)
-                    // up   : Wup   x input (8960*N)
+                    // up   : Wup   x input (N*8960)
                     //// (model.layers.#.mlp.up_proj.weight)
 
                     // gate_silu : SiLU(gate)
                     //// SiLU : x / (1 + e^(-x)) (element op)
 
-                    // up_proj : up * gate_silu (element-wise) (8960*N)
+                    // up_proj : up * gate_silu (element-wise) (N*8960)
 
-                    // down_proj : Wdown x up_proj (1536*N)
+                    // down_proj : Wdown x up_proj (N*1536)
                     //// (model.layers.#.mlp.down_proj.weight)
                 }
 
