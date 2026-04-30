@@ -8,7 +8,6 @@ pub use exclusion::{ExclusionBinary, ExclusionText};
 pub use merge::{MergeBinary, MergeText};
 pub use unicode::{UnicodeBinary, UnicodeText};
 pub use vocab::{VocabBinary, VocabText};
-#[allow(unused)]
 pub use weight::{TensorInfo, WeightBinary, WeightText};
 
 use super::Error;
@@ -23,9 +22,7 @@ pub struct ModelData {
     pub merge_binary: Option<MergeBinary>,
     pub vocab_text: Option<VocabText>,
     pub vocab_binary: Option<VocabBinary>,
-    #[allow(unused)]
     pub weight_text: Option<WeightText>,
-    #[allow(unused)]
     pub weight_binary: Option<WeightBinary>,
 }
 
@@ -38,7 +35,6 @@ pub trait Text {
 }
 
 pub trait Binary {
-    #[allow(unused)]
     fn raw(&self) -> Result<&[u8], Error>;
 }
 

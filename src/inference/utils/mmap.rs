@@ -89,6 +89,19 @@ impl Mmap {
         assert!(self.read_only == false, "the memory region is read-only");
         self.ptr.as_ptr()
     }
+
+    /// Returns a slice view of the mapped region.
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
+
+    /// Returns a mutable slice view of the mapped region.
+    ///
+    /// Panics if the mapped region is read-only.
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        assert!(self.read_only == false, "the memory region is read-only");
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
 }
 
 /// Creates a file-backed private mapping from the given file.

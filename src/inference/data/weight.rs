@@ -7,14 +7,11 @@ use std::sync::OnceLock;
 
 const NUM_LAYER: usize = 28;
 
-#[derive(Debug)]
 pub struct TensorInfo {
     pub shape: Vec<u32>,
     pub offset: Range<u64>,
 }
 
-#[allow(unused)]
-#[derive(Debug)]
 pub struct LayerInfo {
     pub input_layernorm_weight: TensorInfo,
     pub q_proj_bias: TensorInfo,
@@ -30,32 +27,28 @@ pub struct LayerInfo {
     pub down_proj_weight: TensorInfo,
 }
 
-#[derive(Debug)]
 pub struct WeightInfo {
     pub embed_tokens_weight: TensorInfo,
-    #[allow(unused)]
     pub layers: [LayerInfo; NUM_LAYER],
-    #[allow(unused)]
     pub norm_weight: TensorInfo,
-    #[allow(unused)]
     pub lm_head_weight: TensorInfo,
 }
 
 pub struct WeightText {
     path: String,
-    mmap: utils::Mmap,
+    data: utils::Mmap,
     cache: OnceLock<(WeightInfo, Range<usize>)>,
 }
 
 impl WeightText {
     pub fn new(path: &str) -> Result<Self, Error> {
         let file = File::open(path).map_err(|err| Error::io(path, err))?;
-        let mmap = utils::Mmap::new(&file).map_err(|err| Error::io(path, err))?;
+        let data = utils::Mmap::from(&file);
         let cache = OnceLock::new();
 
         Ok(Self {
             path: path.to_string(),
-            mmap,
+            data,
             cache,
         })
     }
@@ -65,7 +58,7 @@ impl Text for WeightText {
     type Output<'a> = (&'a WeightInfo, &'a [u8]);
 
     fn parse(&self) -> Result<Self::Output<'_>, Error> {
-        let raw = self.mmap.as_slice();
+        let raw = self.data.as_slice();
 
         if let Some((weight_info, payload_range)) = self.cache.get() {
             return Ok((weight_info, &raw[payload_range.clone()]));
@@ -77,7 +70,7 @@ impl Text for WeightText {
         let tensors = parse_header(header, &self.path)?;
         let weight_info = WeightInfo::new(tensors)?;
 
-        self.cache.set((weight_info, payload_range)).unwrap();
+        self.cache.set((weight_info, payload_range));
         let (weight_info, payload_range) = self.cache.get().unwrap();
 
         Ok((weight_info, &raw[payload_range.clone()]))
@@ -193,27 +186,25 @@ impl WeightInfo {
 }
 
 pub struct WeightBinary {
-    #[allow(unused)]
     path: String,
-    mmap: utils::Mmap,
+    data: utils::Mmap,
 }
 
 impl WeightBinary {
     pub fn new(path: &str) -> Result<Self, Error> {
         let file = File::open(path).map_err(|err| Error::io(path, err))?;
-        let mmap = utils::Mmap::new(&file).map_err(|err| Error::io(path, err))?;
+        let data = utils::Mmap::from(&file);
 
         Ok(Self {
             path: path.to_string(),
-            mmap,
+            data,
         })
     }
 }
 
 impl Binary for WeightBinary {
-    #[allow(unused)]
     fn raw(&self) -> Result<&[u8], Error> {
-        Ok(self.mmap.as_slice())
+        Ok(self.data.as_slice())
     }
 }
 

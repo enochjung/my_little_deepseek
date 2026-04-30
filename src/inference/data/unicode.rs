@@ -4,7 +4,7 @@ use std::fs::File;
 
 pub struct UnicodeText {
     path: String,
-    mmap: utils::Mmap,
+    data: utils::Mmap,
 }
 
 pub struct UnicodeLine {
@@ -16,11 +16,11 @@ pub struct UnicodeLine {
 impl UnicodeText {
     pub fn new(path: &str) -> Result<Self, Error> {
         let file = File::open(path).map_err(|err| Error::io(path, err))?;
-        let mmap = utils::Mmap::new(&file).map_err(|err| Error::io(path, err))?;
+        let data = utils::Mmap::from(&file);
 
         Ok(Self {
             path: path.to_string(),
-            mmap,
+            data,
         })
     }
 }
@@ -29,7 +29,7 @@ impl Text for UnicodeText {
     type Output<'a> = Box<dyn Iterator<Item = Result<UnicodeLine, Error>> + 'a>;
 
     fn parse(&self) -> Result<Self::Output<'_>, Error> {
-        let lines = self.mmap.as_slice().split(|&x| x == b'\n');
+        let lines = self.data.as_slice().split(|&x| x == b'\n');
 
         let iter = lines
             .enumerate()
@@ -67,26 +67,24 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<UnicodeLine, Error
 }
 
 pub struct UnicodeBinary {
-    #[allow(unused)]
     path: String,
-    mmap: utils::Mmap,
+    data: utils::Mmap,
 }
 
 impl UnicodeBinary {
     pub fn new(path: &str) -> Result<Self, Error> {
         let file = File::open(path).map_err(|err| Error::io(path, err))?;
-        let mmap = utils::Mmap::new(&file).map_err(|err| Error::io(path, err))?;
+        let data = utils::Mmap::from(&file);
 
         Ok(Self {
             path: path.to_string(),
-            mmap,
+            data,
         })
     }
 }
 
-#[allow(unused)]
 impl Binary for UnicodeBinary {
     fn raw(&self) -> Result<&[u8], Error> {
-        Ok(self.mmap.as_slice())
+        Ok(self.data.as_slice())
     }
 }

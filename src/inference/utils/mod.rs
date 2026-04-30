@@ -1,5 +1,5 @@
-mod aligned_bytes;
+//mod aligned_bytes;
 mod mmap;
 
-pub use aligned_bytes::AlignedBytes;
+//pub use aligned_bytes::AlignedBytes;
 pub use mmap::Mmap;
