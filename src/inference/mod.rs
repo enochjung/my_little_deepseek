@@ -1,6 +1,7 @@
 mod data;
 mod engine;
 mod error;
+mod kernel;
 mod utils;
 
 pub mod tensor;
