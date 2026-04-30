@@ -6,7 +6,7 @@ mod tokenizer;
 use super::{Error, ModelData, tensor};
 use embedding::EmbeddingEngine;
 use normalization::NormalizationEngine;
-use tensor::{F32, HostMemory, Tensor};
+use tensor::{F32, Tensor};
 use tokenizer::TokenizerEngine;
 
 const NUM_HIDDEN_LAYERS: usize = 28;
@@ -15,8 +15,8 @@ pub struct InferenceEngine<'a> {
     _model_data: &'a ModelData,
     tokens: Vec<u32>,
     tokenizer_engine: TokenizerEngine<'a>,
-    embedding_engine: EmbeddingEngine<'a, tensor::F32>,
-    normalization_engine: NormalizationEngine<'a, tensor::F32, tensor::HostMemory>,
+    embedding_engine: EmbeddingEngine<'a>,
+    normalization_engine: NormalizationEngine<'a>,
 }
 
 impl<'a> InferenceEngine<'a> {
@@ -47,8 +47,7 @@ impl<'a> InferenceEngine<'a> {
         self.tokens.push(special_token::ASSISTANT);
         self.tokens.push(special_token::THINK_START);
 
-        let mut embedded_tensor =
-            Tensor::<F32, HostMemory>::with_capacity(self.tokens.len() * 1536, 1536)?;
+        let mut embedded_tensor = Tensor::<F32>::with_capacity(self.tokens.len() * 1536, 1536)?;
 
         // word embedding
         //// (model.embed_tokens.weight)
