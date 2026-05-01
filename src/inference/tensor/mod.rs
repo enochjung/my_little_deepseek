@@ -22,6 +22,10 @@ pub trait StorageType {}
 pub struct Host;
 impl StorageType for Host {}
 
+#[allow(unused)]
+pub struct Device;
+impl StorageType for Device {}
+
 /// Tensor layout descriptor.
 ///
 /// Fields:
@@ -37,23 +41,26 @@ pub struct Layout {
     pub stride: usize,
 }
 
-/// Owned 2D tensor with aligned host storage.
+/// Owned 2D tensor with mmap-backed host storage.
 pub struct Tensor<D: DataType, S: StorageType> {
-    data: utils::AlignedBytes,
+    data: utils::Mmap,
+    offset_bytes: usize,
     layout: Layout,
     _pd: PhantomData<(D, S)>,
 }
 
-/// Borrowed immutable tensor view over bytes.
+/// Borrowed immutable tensor view over a mmap-backed tensor region.
 pub struct TensorRef<'a, D: DataType, S: StorageType> {
-    data: &'a [u8],
+    data: &'a utils::Mmap,
+    offset_bytes: usize,
     layout: Layout,
     _pd: PhantomData<(D, S)>,
 }
 
-/// Borrowed mutable tensor view over bytes.
+/// Borrowed mutable tensor view over a mmap-backed tensor region.
 pub struct TensorMut<'a, D: DataType, S: StorageType> {
-    data: &'a mut [u8],
+    data: &'a mut utils::Mmap,
+    offset_bytes: usize,
     layout: Layout,
     _pd: PhantomData<(D, S)>,
 }
@@ -71,13 +78,12 @@ fn validate_shape(nrow: usize, ncol: usize) -> Result<(), Error> {
     Ok(())
 }
 
-fn validate_layout<D: DataType>(
+fn layout_span_bytes<D: DataType>(
     is_row_major: bool,
     nrow: usize,
     ncol: usize,
     stride: usize,
-    data_bytes: usize,
-) -> Result<(), Error> {
+) -> Result<usize, Error> {
     validate_shape(nrow, ncol)?;
 
     let min_stride = if is_row_major { ncol } else { nrow };
@@ -98,8 +104,24 @@ fn validate_layout<D: DataType>(
     }
     .ok_or_else(|| Error::shape_mismatch(0, 0))?;
 
-    if data_bytes != required_bytes {
-        return Err(Error::shape_mismatch(required_bytes, data_bytes));
+    Ok(required_bytes)
+}
+
+fn validate_layout<D: DataType>(
+    is_row_major: bool,
+    nrow: usize,
+    ncol: usize,
+    stride: usize,
+    offset_bytes: usize,
+    data_bytes: usize,
+) -> Result<(), Error> {
+    let required_bytes = layout_span_bytes::<D>(is_row_major, nrow, ncol, stride)?;
+    let end_bytes = offset_bytes
+        .checked_add(required_bytes)
+        .ok_or_else(|| Error::shape_mismatch(usize::MAX, data_bytes))?;
+
+    if end_bytes > data_bytes {
+        return Err(Error::shape_mismatch(end_bytes, data_bytes));
     }
 
     Ok(())
@@ -111,6 +133,12 @@ fn validate_range(
     nrow: usize,
     ncol: usize,
 ) -> Result<(), Error> {
+    if rows.start > rows.end {
+        return Err(Error::out_of_bound(rows.start, rows.end));
+    }
+    if cols.start > cols.end {
+        return Err(Error::out_of_bound(cols.start, cols.end));
+    }
     if rows.end > nrow {
         return Err(Error::out_of_bound(rows.end, nrow));
     }
@@ -125,6 +153,10 @@ fn subview_byte_range<D: DataType>(
     rows: &Range<usize>,
     cols: &Range<usize>,
 ) -> Range<usize> {
+    if rows.start >= rows.end || cols.start >= cols.end {
+        return 0..0;
+    }
+
     let start_elem = if layout.is_row_major {
         rows.start * layout.stride + cols.start
     } else {
@@ -140,11 +172,7 @@ fn subview_byte_range<D: DataType>(
     let start = start_elem * D::BYTES;
     let end = end_elem * D::BYTES;
 
-    if rows.start >= rows.end || cols.start >= cols.end {
-        start..start
-    } else {
-        start..end
-    }
+    start..end
 }
 
 impl<D: DataType, S: StorageType> Tensor<D, S> {
@@ -164,8 +192,7 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         validate_shape(nrow, ncol)?;
 
         let bytes = checked_total_bytes::<D>(nrow, ncol)?;
-        let mut data = utils::AlignedBytes::with_capacity(bytes);
-        data.set_len(bytes);
+        let data = utils::Mmap::new(bytes).expect("mmap failed");
 
         let stride = if is_row_major { ncol } else { nrow };
         let layout = Layout {
@@ -177,6 +204,7 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
 
         Ok(Self {
             data,
+            offset_bytes: 0,
             layout,
             _pd: PhantomData,
         })
@@ -197,7 +225,7 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         validate_shape(nrow_cap, ncol)?;
 
         let bytes = checked_total_bytes::<D>(nrow_cap, ncol)?;
-        let data = utils::AlignedBytes::with_capacity(bytes);
+        let data = utils::Mmap::new(bytes).expect("mmap failed");
         let layout = Layout {
             is_row_major: true,
             nrow: 0,
@@ -207,6 +235,7 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
 
         Ok(Self {
             data,
+            offset_bytes: 0,
             layout,
             _pd: PhantomData,
         })
@@ -232,12 +261,11 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         validate_range(&rows, &cols, self.layout.nrow, self.layout.ncol)?;
 
         let range = subview_byte_range::<D>(&self.layout, &rows, &cols);
-        let data: &'a [u8] = unsafe {
-            std::slice::from_raw_parts(
-                self.data.as_slice().as_ptr().add(range.start),
-                range.end - range.start,
-            )
-        };
+        let offset_bytes = self
+            .offset_bytes
+            .checked_add(range.start)
+            .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+
         let layout = Layout {
             is_row_major: self.layout.is_row_major,
             nrow: rows.end - rows.start,
@@ -246,7 +274,8 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         };
 
         Ok(TensorRef {
-            data,
+            data: &self.data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -272,12 +301,11 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         validate_range(&rows, &cols, self.layout.nrow, self.layout.ncol)?;
 
         let range = subview_byte_range::<D>(&self.layout, &rows, &cols);
-        let data: &'a mut [u8] = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_slice().as_mut_ptr().add(range.start),
-                range.end - range.start,
-            )
-        };
+        let offset_bytes = self
+            .offset_bytes
+            .checked_add(range.start)
+            .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+
         let layout = Layout {
             is_row_major: self.layout.is_row_major,
             nrow: rows.end - rows.start,
@@ -286,7 +314,8 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         };
 
         Ok(TensorMut {
-            data,
+            data: &mut self.data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -311,7 +340,8 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
         };
 
         TensorRef {
-            data: self.data.as_slice(),
+            data: &self.data,
+            offset_bytes: self.offset_bytes,
             layout,
             _pd: PhantomData,
         }
@@ -341,8 +371,8 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
     ///
     /// Validation:
     /// - None
-    fn data(&self) -> *const u8 {
-        self.data.as_slice().as_ptr()
+    fn data_ptr(&self) -> *const u8 {
+        unsafe { self.data.as_ptr().add(self.offset_bytes) }
     }
 
     /// Returns mutable pointer to first element of tensor data.
@@ -355,14 +385,15 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
     ///
     /// Validation:
     /// - None
-    fn data_mut(&mut self) -> *mut u8 {
-        self.data.as_mut_slice().as_mut_ptr()
+    fn data_mut_ptr(&mut self) -> *mut u8 {
+        unsafe { self.data.as_mut_ptr().add(self.offset_bytes) }
     }
 
-    /// Appends rows from `other` into `self`.
+    /// Appends rows or columns from `other` into `self`.
     ///
     /// Validation:
-    /// - Both tensors must be row-major contiguous and have matching `ncol`.
+    /// - Row-major tensors append rows and must have matching `ncol`.
+    /// - Column-major tensors append columns and must have matching `nrow`.
     pub fn append(&mut self, other: &TensorRef<'_, D, S>) -> Result<(), Error> {
         match (self.layout.is_row_major, other.layout.is_row_major) {
             (true, true) => {
@@ -370,35 +401,90 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
                     return Err(Error::shape_mismatch(self.layout.ncol, other.layout.ncol));
                 }
 
-                if other.layout.stride == self.layout.stride {
-                    self.data.extend_from_slice(other.data);
-                } else {
-                    let row_bytes = self.layout.ncol * D::BYTES;
-                    for row in 0..other.layout.nrow {
-                        let row_start = row * other.layout.stride * D::BYTES;
-                        let row_end = row_start + row_bytes;
-                        self.data.extend_from_slice(&other.data[row_start..row_end]);
+                if other.layout.nrow == 0 {
+                    return Ok(());
+                }
+
+                let row_bytes = self.layout.ncol * D::BYTES;
+                let new_nrow = self
+                    .layout
+                    .nrow
+                    .checked_add(other.layout.nrow)
+                    .ok_or_else(|| Error::shape_mismatch(usize::MAX, 0))?;
+                let required_bytes = layout_span_bytes::<D>(
+                    self.layout.is_row_major,
+                    new_nrow,
+                    self.layout.ncol,
+                    self.layout.stride,
+                )?;
+                let required_len = self
+                    .offset_bytes
+                    .checked_add(required_bytes)
+                    .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+                if self.data.len() < required_len {
+                    self.data.resize(required_len).expect("mmap resize failed");
+                }
+
+                let dst_base = unsafe { self.data.as_mut_ptr().add(self.offset_bytes) };
+                let src_base = unsafe { other.data.as_ptr().add(other.offset_bytes) };
+                let dst_row_start = self.layout.nrow;
+
+                for row in 0..other.layout.nrow {
+                    let src_row = unsafe { src_base.add(row * other.layout.stride * D::BYTES) };
+                    let dst_row = unsafe {
+                        dst_base.add((dst_row_start + row) * self.layout.stride * D::BYTES)
+                    };
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_row, dst_row, row_bytes);
                     }
                 }
 
+                self.layout.nrow = new_nrow;
                 Ok(())
             }
             (false, false) => {
                 if self.layout.nrow != other.layout.nrow {
                     return Err(Error::shape_mismatch(self.layout.nrow, other.layout.nrow));
                 }
+                if other.layout.nrow == 0 || other.layout.ncol == 0 {
+                    return Ok(());
+                }
 
-                if other.layout.stride == self.layout.stride {
-                    self.data.extend_from_slice(other.data);
-                } else {
-                    let col_bytes = self.layout.nrow * D::BYTES;
-                    for col in 0..other.layout.ncol {
-                        let col_start = col * other.layout.stride * D::BYTES;
-                        let col_end = col_start + col_bytes;
-                        self.data.extend_from_slice(&other.data[col_start..col_end]);
+                let col_bytes = self.layout.nrow * D::BYTES;
+                let new_ncol = self
+                    .layout
+                    .ncol
+                    .checked_add(other.layout.ncol)
+                    .ok_or_else(|| Error::shape_mismatch(usize::MAX, 0))?;
+                let required_bytes = layout_span_bytes::<D>(
+                    self.layout.is_row_major,
+                    self.layout.nrow,
+                    new_ncol,
+                    self.layout.stride,
+                )?;
+                let required_len = self
+                    .offset_bytes
+                    .checked_add(required_bytes)
+                    .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+                if self.data.len() < required_len {
+                    self.data.resize(required_len).expect("mmap resize failed");
+                }
+
+                let dst_base = unsafe { self.data.as_mut_ptr().add(self.offset_bytes) };
+                let src_base = unsafe { other.data.as_ptr().add(other.offset_bytes) };
+                let dst_col_start = self.layout.ncol;
+
+                for col in 0..other.layout.ncol {
+                    let src_col = unsafe { src_base.add(col * other.layout.stride * D::BYTES) };
+                    let dst_col = unsafe {
+                        dst_base.add((dst_col_start + col) * self.layout.stride * D::BYTES)
+                    };
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_col, dst_col, col_bytes);
                     }
                 }
 
+                self.layout.ncol = new_ncol;
                 Ok(())
             }
             (true, false) => {
@@ -412,10 +498,11 @@ impl<D: DataType, S: StorageType> Tensor<D, S> {
 }
 
 impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
-    /// Constructs a tensor from a byte slice and layout fields.
+    /// Constructs a tensor view from a mmap and layout fields.
     ///
     /// Parameters:
-    /// - `data`: byte slice containing tensor storage.
+    /// - `data`: backing mmap containing tensor storage.
+    /// - `offset_bytes`: byte offset from the mmap start to the first element.
     /// - `is_row_major`: row-major flag.
     /// - `nrow`: number of rows.
     /// - `ncol`: number of columns.
@@ -424,14 +511,15 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
     /// Returns:
     /// - `Result<Self, Error>`: new `TensorRef` or error.
     pub fn new(
-        data: &'a [u8],
+        data: &'a utils::Mmap,
+        offset_bytes: usize,
         is_row_major: bool,
         nrow: usize,
         ncol: usize,
         stride: usize,
     ) -> Result<Self, Error> {
         validate_shape(nrow, ncol)?;
-        validate_layout::<D>(is_row_major, nrow, ncol, stride, data.len())?;
+        validate_layout::<D>(is_row_major, nrow, ncol, stride, offset_bytes, data.len())?;
 
         let layout = Layout {
             is_row_major,
@@ -442,6 +530,7 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
 
         Ok(Self {
             data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -467,9 +556,11 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
         validate_range(&rows, &cols, self.layout.nrow, self.layout.ncol)?;
 
         let range = subview_byte_range::<D>(&self.layout, &rows, &cols);
-        let data = unsafe {
-            std::slice::from_raw_parts(self.data.as_ptr().add(range.start), range.end - range.start)
-        };
+        let offset_bytes = self
+            .offset_bytes
+            .checked_add(range.start)
+            .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+
         let layout = Layout {
             is_row_major: self.layout.is_row_major,
             nrow: rows.end - rows.start,
@@ -478,7 +569,8 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
         };
 
         Ok(TensorRef {
-            data,
+            data: self.data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -504,6 +596,7 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
 
         TensorRef {
             data: self.data,
+            offset_bytes: self.offset_bytes,
             layout,
             _pd: PhantomData,
         }
@@ -533,16 +626,17 @@ impl<'a, D: DataType, S: StorageType> TensorRef<'a, D, S> {
     ///
     /// Validation:
     /// - None
-    pub fn data(&self) -> *const u8 {
-        self.data.as_ptr()
+    pub fn data_ptr(&self) -> *const u8 {
+        unsafe { self.data.as_ptr().add(self.offset_bytes) }
     }
 }
 
 impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
-    /// Constructs a writable tensor from a mutable byte slice and layout fields.
+    /// Constructs a writable tensor view from a mmap and layout fields.
     ///
     /// Parameters:
-    /// - `data`: mutable byte slice containing tensor storage.
+    /// - `data`: backing mmap containing tensor storage.
+    /// - `offset_bytes`: byte offset from the mmap start to the first element.
     /// - `is_row_major`: row-major flag.
     /// - `nrow`: number of rows.
     /// - `ncol`: number of columns.
@@ -551,13 +645,14 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
     /// Returns:
     /// - `Result<Self, Error>`: new `TensorMut` or error.
     pub fn new(
-        data: &'a mut [u8],
+        data: &'a mut utils::Mmap,
+        offset_bytes: usize,
         is_row_major: bool,
         nrow: usize,
         ncol: usize,
         stride: usize,
     ) -> Result<Self, Error> {
-        validate_layout::<D>(is_row_major, nrow, ncol, stride, data.len())?;
+        validate_layout::<D>(is_row_major, nrow, ncol, stride, offset_bytes, data.len())?;
 
         let layout = Layout {
             is_row_major,
@@ -568,6 +663,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
 
         Ok(Self {
             data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -600,23 +696,14 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
             &(0usize..self.layout.ncol),
         );
 
-        let upper_data = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(upper_range.start),
-                upper_range.end - upper_range.start,
-            )
-        };
-
-        let lower_data = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(lower_range.start),
-                lower_range.end - lower_range.start,
-            )
-        };
+        let data_ptr = self.data as *mut utils::Mmap;
+        let upper_data = unsafe { &mut *data_ptr };
+        let lower_data = unsafe { &mut *data_ptr };
 
         Ok((
             Self {
                 data: upper_data,
+                offset_bytes: self.offset_bytes + upper_range.start,
                 layout: Layout {
                     is_row_major: self.layout.is_row_major,
                     nrow: mid,
@@ -627,6 +714,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
             },
             Self {
                 data: lower_data,
+                offset_bytes: self.offset_bytes + lower_range.start,
                 layout: Layout {
                     is_row_major: self.layout.is_row_major,
                     nrow: self.layout.nrow - mid,
@@ -665,23 +753,14 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
             &(mid..self.layout.ncol),
         );
 
-        let left_data = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(left_range.start),
-                left_range.end - left_range.start,
-            )
-        };
-
-        let right_data = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(right_range.start),
-                right_range.end - right_range.start,
-            )
-        };
+        let data_ptr = self.data as *mut utils::Mmap;
+        let left_data = unsafe { &mut *data_ptr };
+        let right_data = unsafe { &mut *data_ptr };
 
         Ok((
             Self {
                 data: left_data,
+                offset_bytes: self.offset_bytes + left_range.start,
                 layout: Layout {
                     is_row_major: self.layout.is_row_major,
                     nrow: self.layout.nrow,
@@ -692,6 +771,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
             },
             Self {
                 data: right_data,
+                offset_bytes: self.offset_bytes + right_range.start,
                 layout: Layout {
                     is_row_major: self.layout.is_row_major,
                     nrow: self.layout.nrow,
@@ -723,12 +803,11 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
         validate_range(&rows, &cols, self.layout.nrow, self.layout.ncol)?;
 
         let range = subview_byte_range::<D>(&self.layout, &rows, &cols);
-        let data = unsafe {
-            std::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(range.start),
-                range.end - range.start,
-            )
-        };
+        let offset_bytes = self
+            .offset_bytes
+            .checked_add(range.start)
+            .ok_or_else(|| Error::shape_mismatch(usize::MAX, self.data.len()))?;
+        let data = unsafe { &mut *(self.data as *mut utils::Mmap) };
         let layout = Layout {
             is_row_major: self.layout.is_row_major,
             nrow: rows.end - rows.start,
@@ -738,6 +817,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
 
         Ok(TensorMut {
             data,
+            offset_bytes,
             layout,
             _pd: PhantomData,
         })
@@ -754,8 +834,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
     /// Validation:
     /// - None
     pub fn transpose(&mut self) -> TensorMut<'a, D, S> {
-        let data =
-            unsafe { std::slice::from_raw_parts_mut(self.data.as_mut_ptr(), self.data.len()) };
+        let data = unsafe { &mut *(self.data as *mut utils::Mmap) };
         let layout = Layout {
             is_row_major: !self.layout.is_row_major,
             nrow: self.layout.ncol,
@@ -765,6 +844,7 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
 
         TensorMut {
             data,
+            offset_bytes: self.offset_bytes,
             layout,
             _pd: PhantomData,
         }
@@ -794,12 +874,12 @@ impl<'a, D: DataType, S: StorageType> TensorMut<'a, D, S> {
     ///
     /// Validation:
     /// - None
-    pub fn data_mut(&mut self) -> *mut u8 {
-        self.data.as_mut_ptr()
+    pub fn data_mut_ptr(&mut self) -> *mut u8 {
+        unsafe { self.data.as_mut_ptr().add(self.offset_bytes) }
     }
 }
 
-impl<D: DataType, S: StorageType + Clone> Clone for Tensor<D, S> {
+impl<D: DataType, S: StorageType> Clone for Tensor<D, S> {
     /// Clones `Tensor` by cloning storage and layout.
     ///
     /// Parameters:
@@ -811,8 +891,12 @@ impl<D: DataType, S: StorageType + Clone> Clone for Tensor<D, S> {
     /// Validation:
     /// - None
     fn clone(&self) -> Self {
+        let mut data = utils::Mmap::new(self.data.len()).expect("mmap clone allocation failed");
+        data.as_mut_slice().copy_from_slice(self.data.as_slice());
+
         Self {
-            data: self.data.clone(),
+            data,
+            offset_bytes: self.offset_bytes,
             layout: self.layout,
             _pd: PhantomData,
         }
@@ -833,7 +917,7 @@ impl<'a> From<&TensorRef<'a, BF16, Host>> for Tensor<F32, Host> {
     fn from(src: &TensorRef<'a, BF16, Host>) -> Self {
         let mut dst = Self::new(src.layout.is_row_major, src.layout.nrow, src.layout.ncol)
             .expect("valid BF16 to F32 conversion layout should allocate");
-        let src_bytes = src.data;
+        let src_bytes = &src.data.as_slice()[src.offset_bytes..];
         let dst_bytes = dst.data.as_mut_slice();
 
         match src.layout.is_row_major {
@@ -887,7 +971,7 @@ impl Tensor<F32, Host> {
     /// Validation:
     /// - None
     pub fn silu(&mut self) -> () {
-        let x = self.data.as_mut_slice().as_mut_ptr() as *mut f32;
+        let x = self.data.as_mut_slice()[self.offset_bytes..].as_mut_ptr() as *mut f32;
         let n = self.layout.nrow * self.layout.ncol;
 
         unsafe { kernel::x86_64::silu(x, n) };
@@ -915,11 +999,30 @@ impl Tensor<F32, Host> {
                     return Err(Error::shape_mismatch(self.layout.ncol, weight.layout.ncol));
                 }
 
+                validate_layout::<F32>(
+                    self.layout.is_row_major,
+                    self.layout.nrow,
+                    self.layout.ncol,
+                    self.layout.stride,
+                    self.offset_bytes,
+                    self.data.len(),
+                )?;
+                validate_layout::<F32>(
+                    weight.layout.is_row_major,
+                    weight.layout.nrow,
+                    weight.layout.ncol,
+                    weight.layout.stride,
+                    weight.offset_bytes,
+                    weight.data.len(),
+                )?;
+
                 let ncol = self.layout.ncol;
                 let nrow = self.layout.nrow;
 
-                let data_ptr = self.data.as_mut_slice().as_mut_ptr() as *mut f32;
-                let weight_ptr = weight.data.as_ptr() as *const f32;
+                let data_ptr =
+                    self.data.as_mut_slice()[self.offset_bytes..].as_mut_ptr() as *mut f32;
+                let weight_ptr =
+                    unsafe { weight.data.as_ptr().add(weight.offset_bytes) } as *const f32;
 
                 for _ in 0..nrow {
                     let row_rms = unsafe { kernel::x86_64::rms(data_ptr, ncol) };
@@ -957,21 +1060,31 @@ impl Tensor<F32, Host> {
     ) -> Result<(), Error> {
         let expected = checked_total_bytes::<F32>(self.layout.nrow, self.layout.ncol)?;
         if !self.layout.is_row_major || self.layout.stride != self.layout.ncol {
-            return Err(Error::shape_mismatch(expected, self.data.as_slice().len()));
+            return Err(Error::shape_mismatch(
+                expected,
+                self.data.len().saturating_sub(self.offset_bytes),
+            ));
         }
-        if self.data.as_slice().len() != expected {
-            return Err(Error::shape_mismatch(expected, self.data.as_slice().len()));
+        if self
+            .offset_bytes
+            .checked_add(expected)
+            .map_or(true, |end| end > self.data.len())
+        {
+            return Err(Error::shape_mismatch(
+                expected,
+                self.data.len().saturating_sub(self.offset_bytes),
+            ));
         }
         if weight.layout.nrow != self.layout.ncol || weight.layout.ncol != self.layout.ncol {
             return Err(Error::shape_mismatch(
                 self.layout.ncol * self.layout.ncol * F32::BYTES,
-                weight.data.len(),
+                weight.data.len().saturating_sub(weight.offset_bytes),
             ));
         }
         if bias.layout.nrow != 1 || bias.layout.ncol != self.layout.ncol {
             return Err(Error::shape_mismatch(
                 self.layout.ncol * F32::BYTES,
-                bias.data.len(),
+                bias.data.len().saturating_sub(bias.offset_bytes),
             ));
         }
 
@@ -980,6 +1093,7 @@ impl Tensor<F32, Host> {
             weight.layout.nrow,
             weight.layout.ncol,
             weight.layout.stride,
+            weight.offset_bytes,
             weight.data.len(),
         )?;
         validate_layout::<F32>(
@@ -987,14 +1101,23 @@ impl Tensor<F32, Host> {
             bias.layout.nrow,
             bias.layout.ncol,
             bias.layout.stride,
+            bias.offset_bytes,
             bias.data.len(),
+        )?;
+        validate_layout::<F32>(
+            self.layout.is_row_major,
+            self.layout.nrow,
+            self.layout.ncol,
+            self.layout.stride,
+            self.offset_bytes,
+            self.data.len(),
         )?;
 
         let nrow = self.layout.nrow;
         let ncol = self.layout.ncol;
-        let values_ptr = self.data.as_mut_slice().as_mut_ptr() as *mut f32;
-        let weight_ptr = weight.data.as_ptr() as *const f32;
-        let bias_ptr = bias.data.as_ptr() as *const f32;
+        let values_ptr = self.data.as_mut_slice()[self.offset_bytes..].as_mut_ptr() as *mut f32;
+        let weight_ptr = unsafe { weight.data.as_ptr().add(weight.offset_bytes) } as *const f32;
+        let bias_ptr = unsafe { bias.data.as_ptr().add(bias.offset_bytes) } as *const f32;
         let mut buf = vec![0f32; ncol];
         unsafe {
             kernel::x86_64::muladd_mn_nn_1n(
