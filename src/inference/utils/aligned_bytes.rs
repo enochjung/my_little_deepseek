@@ -3,7 +3,7 @@ use std::ptr::NonNull;
 
 #[derive(Debug)]
 pub struct AlignedBytes {
-    ptr: Option<NonNull<u8>>,
+    ptr: NonNull<u8>,
     len: usize,
     cap: usize,
 }
@@ -12,7 +12,7 @@ impl AlignedBytes {
     const ALIGN: usize = 64;
 
     pub fn new(len: usize, cap: usize) -> Self {
-        let cap = cap.max(Self::ALIGN).max(len);
+        let cap = cap.max(len).max(Self::ALIGN).next_power_of_two();
 
         let layout = Layout::from_size_align(cap, Self::ALIGN)
             .expect("aligned allocation layout should be valid");
@@ -20,69 +20,25 @@ impl AlignedBytes {
         if raw.is_null() {
             handle_alloc_error(layout);
         }
+        let ptr = NonNull::new(raw).unwrap();
 
-        Self {
-            ptr: NonNull::new(raw),
-            len: len,
-            cap: cap,
-        }
+        Self { ptr, len, cap }
     }
 
-    pub fn with_capacity(cap: usize) -> Self {
-        if cap == 0 {
-            return Self::new();
-        }
-
-        let layout = Layout::from_size_align(cap, Self::ALIGN)
-            .expect("aligned allocation layout should be valid");
-        let raw = unsafe { alloc(layout) };
-        if raw.is_null() {
-            handle_alloc_error(layout);
-        }
-
-        Self {
-            ptr: NonNull::new(raw),
-            len: 0,
-            cap,
-        }
+    pub fn as_ptr(&self) -> *const u8 {
+        self.ptr.as_ptr()
     }
 
-    pub fn from_slice(data: &[u8]) -> Self {
-        let mut out = Self::with_capacity(data.len());
-        out.extend_from_slice(data);
-        out
+    pub fn as_mut_ptr(&mut self) -> *mut u8 {
+        self.ptr.as_ptr()
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        if self.len == 0 {
-            return &[];
-        }
-
-        unsafe {
-            std::slice::from_raw_parts(
-                self.ptr.expect("non-empty must have ptr").as_ptr(),
-                self.len,
-            )
-        }
-    }
-
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        if self.len == 0 {
-            return &mut [];
-        }
-
-        unsafe {
-            std::slice::from_raw_parts_mut(
-                self.ptr.expect("non-empty must have ptr").as_ptr(),
-                self.len,
-            )
-        }
-    }
-
+    /*
     pub fn set_len(&mut self, len: usize) {
         debug_assert!(len <= self.cap);
         self.len = len;
     }
+    */
 
     fn reserve(&mut self, additional: usize) {
         let needed = self
@@ -130,6 +86,7 @@ impl AlignedBytes {
         self.cap = new_cap;
     }
 
+    /*
     pub fn extend_from_slice(&mut self, src: &[u8]) {
         if src.is_empty() {
             return;
@@ -146,22 +103,31 @@ impl AlignedBytes {
         unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) };
         self.len += src.len();
     }
+    */
+}
+
+impl From<&[u8]> for AlignedBytes {
+    fn from(data: &[u8]) -> Self {
+        let mut out = Self::new(0, data.len());
+        out.extend_from_slice(data);
+        out
+    }
 }
 
 impl Clone for AlignedBytes {
     fn clone(&self) -> Self {
+        let len = self.len;
+        let cap = self.cap;
+        let mut cloned = Self::new(len, cap);
+
         Self::from_slice(self.as_slice())
     }
 }
 
 impl Drop for AlignedBytes {
     fn drop(&mut self) {
-        if self.cap == 0 {
-            return;
-        }
-
         let layout = Layout::from_size_align(self.cap, Self::ALIGN)
             .expect("aligned allocation layout should be valid");
-        unsafe { dealloc(self.ptr.expect("allocation should exist").as_ptr(), layout) };
+        unsafe { dealloc(self.ptr.as_ptr(), layout) };
     }
 }

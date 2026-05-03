@@ -46,6 +46,10 @@ impl Mmap {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
     /// Reallocates the mapping to a new length using `mremap`.
     ///
     /// Returns an error when `len == 0` or when resizing fails.
