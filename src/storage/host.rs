@@ -1,5 +1,5 @@
 use super::Storage;
-use std::fs::File;
+use std::fs::OpenOptions;
 
 pub(crate) struct Host {
     name: String,
@@ -20,7 +20,10 @@ impl TryFrom<&str> for Host {
     type Error = crate::Error;
 
     fn try_from(path: &str) -> Result<Self, Self::Error> {
-        let file = File::open(path).map_err(|err| crate::Error::io(path, err))?;
+        let file = OpenOptions::new()
+            .read(true)
+            .open(path)
+            .map_err(|err| crate::Error::io(path, err))?;
         let data = mmap::Mmap::try_from(file).map_err(|err| crate::Error::io(path, err))?;
 
         Ok(Self {
@@ -31,6 +34,24 @@ impl TryFrom<&str> for Host {
 }
 
 impl Storage for Host {}
+
+#[cfg(test)]
+mod tests {
+    use super::Host;
+
+    const UNICODE_PATH: &str = "model/UnicodeData.txt";
+
+    #[test]
+    fn unicode_data_is_mapped() {
+        let host = Host::try_from(UNICODE_PATH)
+            .expect("UnicodeData.txt should load through Host::try_from");
+
+        assert!(
+            host.as_slice().starts_with(b"0000;<control>"),
+            "mapped UnicodeData.txt should start with the expected prefix"
+        );
+    }
+}
 
 mod mmap {
     use std::fs::File;
@@ -160,7 +181,6 @@ mod mmap {
 
         fn try_from(file: File) -> Result<Self, Self::Error> {
             let metadata = file.metadata()?;
-            let readonly = metadata.permissions().readonly();
             let len = metadata.len() as usize;
 
             if len == 0 {
@@ -171,38 +191,41 @@ mod mmap {
             }
 
             let fd = file.as_raw_fd();
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
 
-            let (mtype, ptr) = match readonly {
-                true => {
-                    let mtype = MmapType::ReadOnlyFile(file);
-                    let ptr = unsafe {
-                        libc::mmap(
-                            std::ptr::null_mut(),
-                            len,
-                            libc::PROT_READ,
-                            libc::MAP_PRIVATE,
-                            fd,
-                            0,
-                        )
-                    };
+            let readonly = (flags & libc::O_ACCMODE) == libc::O_RDONLY;
 
-                    (mtype, ptr)
-                }
-                false => {
-                    let mtype = MmapType::WritableFile(file);
-                    let ptr = unsafe {
-                        libc::mmap(
-                            std::ptr::null_mut(),
-                            len,
-                            libc::PROT_READ | libc::PROT_WRITE,
-                            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                            fd,
-                            0,
-                        )
-                    };
+            let (mtype, ptr) = if readonly {
+                let mtype = MmapType::ReadOnlyFile(file);
+                let ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        len,
+                        libc::PROT_READ,
+                        libc::MAP_PRIVATE,
+                        fd,
+                        0,
+                    )
+                };
 
-                    (mtype, ptr)
-                }
+                (mtype, ptr)
+            } else {
+                let mtype = MmapType::WritableFile(file);
+                let ptr = unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        len,
+                        libc::PROT_READ | libc::PROT_WRITE,
+                        libc::MAP_PRIVATE,
+                        fd,
+                        0,
+                    )
+                };
+
+                (mtype, ptr)
             };
 
             if ptr == libc::MAP_FAILED {
