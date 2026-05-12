@@ -1,0 +1,112 @@
+#[derive(Debug)]
+pub struct Error {
+    kind: ErrorKind,
+}
+
+impl Error {
+    pub(crate) fn io(path: &str, err: std::io::Error) -> Self {
+        Self {
+            kind: ErrorKind::Io {
+                path: path.to_string(),
+                err,
+            },
+        }
+    }
+
+    pub(crate) fn broken_data(path: &str, line: usize) -> Self {
+        Self {
+            kind: ErrorKind::BrokenData {
+                path: path.to_string(),
+                line,
+            },
+        }
+    }
+
+    pub(crate) fn unknown_format(path: &str) -> Self {
+        Self {
+            kind: ErrorKind::UnknownFormat {
+                path: path.to_string(),
+            },
+        }
+    }
+
+    pub(crate) fn data_not_provided(name: &str) -> Self {
+        Self {
+            kind: ErrorKind::DataNotProvided {
+                name: name.to_string(),
+            },
+        }
+    }
+
+    pub(crate) fn invalid_char(codepoint: u32) -> Self {
+        Self {
+            kind: ErrorKind::InvalidChar { codepoint },
+        }
+    }
+
+    pub(crate) fn shape_mismatch(expected: usize, actual: usize) -> Self {
+        Self {
+            kind: ErrorKind::ShapeMismatch { expected, actual },
+        }
+    }
+
+    pub(crate) fn out_of_bound(index: usize, limit: usize) -> Self {
+        Self {
+            kind: ErrorKind::OutOfBound { index, limit },
+        }
+    }
+
+    pub(crate) fn configure_failed(field: &str) -> Self {
+        Self {
+            kind: ErrorKind::ConfigureFailed {
+                field: field.to_string(),
+            },
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+#[derive(Debug)]
+enum ErrorKind {
+    Io { path: String, err: std::io::Error },
+    BrokenData { path: String, line: usize },
+    UnknownFormat { path: String },
+    DataNotProvided { name: String },
+    InvalidChar { codepoint: u32 },
+    ShapeMismatch { expected: usize, actual: usize },
+    OutOfBound { index: usize, limit: usize },
+    ConfigureFailed { field: String },
+}
+
+impl std::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io { path, err } => write!(f, "cannot read {path}: {err}"),
+            Self::BrokenData { path, line } => {
+                write!(f, "broken {path} at line {line}")
+            }
+            Self::UnknownFormat { path } => write!(f, "unknown {path} format"),
+            Self::DataNotProvided { name } => write!(f, "{name} data not provided"),
+            Self::InvalidChar { codepoint } => write!(f, "invalid character: U+{:04X}", codepoint),
+            Self::ShapeMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "shape mismatch: expected {expected} bytes, got {actual} bytes"
+                )
+            }
+            Self::OutOfBound { index, limit } => {
+                write!(f, "out of bound: index {index}, limit {limit}")
+            }
+            Self::ConfigureFailed { field } => {
+                write!(f, "configuration failed at {field}")
+            }
+        }
+    }
+}
