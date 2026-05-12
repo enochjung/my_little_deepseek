@@ -1,9 +1,9 @@
-mod inference;
+use my_little_deepseek::*;
 
 use std::io::Write;
 
 const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
-const EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
+const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
 const MERGE_PATH: &'static str = "model/merges.json";
 const VOCAB_PATH: &'static str = "model/vocab.json";
 const WEIGHT_PATH: &'static str = "model/model.safetensors";
@@ -12,16 +12,19 @@ fn main() {
     print!("[] Initializing... ");
     std::io::stdout().flush().unwrap();
 
-    let model_data = inference::ModelData::new(
-        UNICODE_PATH,
-        EXCLUSION_PATH,
-        MERGE_PATH,
-        VOCAB_PATH,
-        WEIGHT_PATH,
-    )
-    .expect("initializing model data should succeed");
-    let mut inference_engine = inference::InferenceEngine::new(&model_data)
-        .expect("initializing inference engine should succeed");
+    let conf = config::Configure::new()
+        .unicode_format(config::UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
+        .composition_exclusion_format(
+            config::CompositionExclusionFormat::UnicodeCharacterDatabase {
+                path: COMPOSITION_EXCLUSION_PATH,
+            },
+        )
+        .merge_format(config::MergeFormat::HuggingFace { path: MERGE_PATH })
+        .vocab_format(config::VocabFormat::HuggingFace { path: VOCAB_PATH })
+        .weight_format(config::WeightFormat::Safetensor { path: WEIGHT_PATH });
+
+    let model = Model::new(conf).expect("initializing model should succeed");
+    let mut session = Session::new(&model).expect("generating new session should succeed");
 
     println!("done!");
     println!("---------------------------------");
@@ -44,8 +47,8 @@ fn main() {
         print!("[] Inferencing... ");
         std::io::stdout().flush().unwrap();
 
-        let output = inference_engine
-            .run_prompt(input)
+        let output = session
+            .send_prompt(input)
             .expect("inferencing should succeed");
 
         println!("done!");
