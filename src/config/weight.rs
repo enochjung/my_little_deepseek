@@ -177,162 +177,177 @@ mod safetensor {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
+    const OFFSET: usize = 38621;
 
-    fn assert(tensor_info: &TensorInfo, expected_shape: &[u32], expected_offset: Range<u64>) {
-        assert_eq!(
-            tensor_info.shape, expected_shape,
-            "actual: {:?}, expected: {:?}",
-            tensor_info.shape, expected_shape
-        );
-        assert_eq!(
-            tensor_info.offset, expected_offset,
-            "actual: {:?}, expected: {:?}",
-            tensor_info.offset, expected_offset
-        );
+    fn assert(
+        tensor_info: &[TensorInfo],
+        tensor_name: &str,
+        expected_shape: &[u32],
+        expected_offset: Range<usize>,
+    ) {
+        for info in tensor_info {
+            if info.name == tensor_name {
+                assert_eq!(
+                    info.shape, expected_shape,
+                    "actual: {:?}, expected: {:?}",
+                    info.shape, expected_shape
+                );
+                assert_eq!(
+                    info.offset, expected_offset,
+                    "actual: {:?}, expected: {:?}",
+                    info.offset, expected_offset
+                );
+                return;
+            }
+        }
+
+        panic!("tensor '{}' missing", tensor_name);
     }
 
-    fn build_weight_text() -> WeightText {
-        WeightText::new(WEIGHT_PATH).expect("initializing weight text should secceed")
-    }
+    fn get_tensor_info() -> Vec<TensorInfo> {
+        let weight_format = WeightFormat::Safetensor { path: WEIGHT_PATH };
+        let (file, parse) = weight_format
+            .read()
+            .expect("reading weight format should succeed");
 
-    fn get_weight_info<'a>(weight_text: &'a WeightText) -> &'a WeightInfo {
-        let (weight_info, _) = weight_text.parse().expect("parsing should secceed");
-        weight_info
+        let iter = parse(&file);
+        iter.collect()
     }
 
     #[test]
     fn case01_text_embed_tokens_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.embed_tokens_weight,
+            &tensor_info,
+            "model.embed_tokens.weight",
             &[151936, 1536],
-            0..466747392,
+            0 + OFFSET..466747392 + OFFSET,
         );
     }
 
     #[test]
     fn case02_text_q_proj_bias() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[0].q_proj_bias,
+            &tensor_info,
+            "model.layers.0.self_attn.q_proj.bias",
             &[1536],
-            466747392..466750464,
+            466747392 + OFFSET..466750464 + OFFSET,
         );
     }
 
     #[test]
     fn case03_text_k_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[1].k_proj_weight,
+            &tensor_info,
+            "model.layers.1.self_attn.k_proj.weight",
             &[256, 1536],
-            565065728..565852160,
+            565065728 + OFFSET..565852160 + OFFSET,
         );
     }
 
     #[test]
     fn case04_text_v_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[2].v_proj_weight,
+            &tensor_info,
+            "model.layers.2.self_attn.v_proj.weight",
             &[256, 1536],
-            659447808..660234240,
+            659447808 + OFFSET..660234240 + OFFSET,
         );
     }
 
     #[test]
     fn case05_text_o_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[3].o_proj_weight,
+            &tensor_info,
+            "model.layers.3.self_attn.o_proj.weight",
             &[1536, 1536],
-            753829888..758548480,
+            753829888 + OFFSET..758548480 + OFFSET,
         );
     }
 
     #[test]
     fn case06_text_gate_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[4].gate_proj_weight,
+            &tensor_info,
+            "model.layers.4.mlp.gate_proj.weight",
             &[8960, 1536],
-            852144128..879669248,
+            852144128 + OFFSET..879669248 + OFFSET,
         );
     }
 
     #[test]
     fn case07_text_up_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[5].up_proj_weight,
+            &tensor_info,
+            "model.layers.5.mlp.up_proj.weight",
             &[8960, 1536],
-            973264896..1000790016,
+            973264896 + OFFSET..1000790016 + OFFSET,
         );
     }
 
     #[test]
     fn case08_text_down_proj_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[6].down_proj_weight,
+            &tensor_info,
+            "model.layers.6.mlp.down_proj.weight",
             &[1536, 8960],
-            1094385664..1121910784,
+            1094385664 + OFFSET..1121910784 + OFFSET,
         );
     }
 
     #[test]
     fn case09_text_input_layernorm_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[7].input_layernorm_weight,
+            &tensor_info,
+            "model.layers.7.input_layernorm.weight",
             &[1536],
-            1215506432..1215509504,
+            1215506432 + OFFSET..1215509504 + OFFSET,
         );
     }
 
     #[test]
     fn case10_text_post_attention_layernorm_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.layers[27].post_attention_layernorm_weight,
+            &tensor_info,
+            "model.layers.27.post_attention_layernorm.weight",
             &[1536],
-            3087422464..3087425536,
+            3087422464 + OFFSET..3087425536 + OFFSET,
         );
     }
 
     #[test]
     fn case11_text_norm_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
-        assert(&weight_info.norm_weight, &[1536], 3087425536..3087428608);
+        let tensor_info = get_tensor_info();
+        assert(
+            &tensor_info,
+            "model.norm.weight",
+            &[1536],
+            3087425536 + OFFSET..3087428608 + OFFSET,
+        );
     }
 
     #[test]
     fn case12_text_lm_head_weight() {
-        let weight_text = build_weight_text();
-        let weight_info = get_weight_info(&weight_text);
+        let tensor_info = get_tensor_info();
         assert(
-            &weight_info.lm_head_weight,
+            &tensor_info,
+            "lm_head.weight",
             &[151936, 1536],
-            3087428608..3554176000,
+            3087428608 + OFFSET..3554176000 + OFFSET,
         );
     }
 }
-
-*/
