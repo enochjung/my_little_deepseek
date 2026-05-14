@@ -1,5 +1,5 @@
 use super::{Format, parse_hex_u32};
-use crate::storage::Host;
+use crate::storage::{Host, Storage};
 
 pub enum CompositionExclusionFormat<'a> {
     UnicodeCharacterDatabase { path: &'a str },

@@ -1,5 +1,5 @@
 use super::{Format, parse_string_with_escape_sequence};
-use crate::storage::Host;
+use crate::storage::{Host, Storage};
 
 pub enum MergeFormat<'a> {
     HuggingFace { path: &'a str },

@@ -1,5 +1,5 @@
 use super::{Format, parse_string_with_escape_sequence, parse_u32};
-use crate::storage::Host;
+use crate::storage::{Host, Storage};
 
 pub enum VocabFormat<'a> {
     HuggingFace { path: &'a str },

@@ -19,6 +19,8 @@ pub struct Configure<'a> {
     pub(crate) weight_format: Option<WeightFormat<'a>>,
     pub(crate) num_hidden_layers: usize,
     pub(crate) rms_norm_epsilon: f32,
+    pub(crate) hidden_size: u32,
+    pub(crate) intermediate_size: u32,
 }
 
 impl<'a> Configure<'a> {
@@ -31,6 +33,8 @@ impl<'a> Configure<'a> {
             weight_format: None,
             num_hidden_layers: 28,
             rms_norm_epsilon: 1e-06,
+            hidden_size: 1536,
+            intermediate_size: 8960,
         }
     }
 
@@ -66,6 +70,16 @@ impl<'a> Configure<'a> {
 
     pub fn rms_norm_epsilon(mut self, value: f32) -> Self {
         self.rms_norm_epsilon = value;
+        self
+    }
+
+    pub fn hidden_size(mut self, value: u32) -> Self {
+        self.hidden_size = value;
+        self
+    }
+
+    pub fn intermediate_size(mut self, value: u32) -> Self {
+        self.intermediate_size = value;
         self
     }
 }

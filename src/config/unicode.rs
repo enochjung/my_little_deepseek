@@ -1,5 +1,5 @@
 use super::{Format, parse_hex_u32, parse_u8};
-use crate::storage::Host;
+use crate::storage::{Host, Storage};
 
 pub enum UnicodeFormat<'a> {
     UnicodeCharacterDatabase { path: &'a str },

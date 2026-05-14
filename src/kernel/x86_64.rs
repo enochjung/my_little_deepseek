@@ -6,6 +6,67 @@
 
 use std::arch::x86_64::*;
 
+/// Casts `n` BF16 values from `src` into `dst` as `f32`.
+///
+/// # Safety
+///
+/// - `dst` must be valid for writes of `n` contiguous `f32` values.
+/// - `src` must be valid for reads of `n * 2` contiguous bytes.
+/// - `dst` and `src` must not overlap.
+/// - `dst` must be 64-byte aligned.
+/// - `src` may be unaligned.
+pub(crate) unsafe fn cast_bf16_to_f32(dst: *mut f32, src: *const u8, n: usize) -> () {
+    if is_x86_feature_detected!("avx512f") {
+        unsafe { cast_bf16_to_f32_avx512(dst, src, n) };
+        return;
+    }
+
+    unsafe { cast_bf16_to_f32_scalar(dst, src, n) };
+}
+
+#[inline]
+unsafe fn cast_bf16_to_f32_scalar(dst: *mut f32, src: *const u8, n: usize) -> () {
+    let mut src_ptr = src;
+    let mut dst_ptr = dst;
+    let dst_end = unsafe { dst.add(n) };
+
+    while dst_ptr != dst_end {
+        let bf16_u16 = unsafe { (src_ptr as *const u16).read_unaligned() } as u32;
+        unsafe { *dst_ptr = f32::from_bits(bf16_u16 << 16) };
+
+        src_ptr = unsafe { src_ptr.add(2) };
+        dst_ptr = unsafe { dst_ptr.add(1) };
+    }
+}
+
+#[target_feature(enable = "avx512f")]
+#[inline]
+unsafe fn cast_bf16_to_f32_avx512(dst: *mut f32, src: *const u8, n: usize) -> () {
+    let mut src_ptr = src;
+    let mut dst_ptr = dst;
+
+    let vec_end = unsafe { dst.add(n & !15) };
+    let dst_end = unsafe { dst.add(n) };
+
+    while dst_ptr != vec_end {
+        let bf16_v = unsafe { _mm256_loadu_si256(src_ptr as *const __m256i) };
+        let bits_u32 = _mm512_cvtepu16_epi32(bf16_v);
+        let bits_f32 = _mm512_castsi512_ps(_mm512_slli_epi32(bits_u32, 16));
+        unsafe { _mm512_store_ps(dst_ptr, bits_f32) };
+
+        src_ptr = unsafe { src_ptr.add(32) };
+        dst_ptr = unsafe { dst_ptr.add(16) };
+    }
+
+    while dst_ptr != dst_end {
+        let bf16_u16 = unsafe { (src_ptr as *const u16).read_unaligned() } as u32;
+        unsafe { *dst_ptr = f32::from_bits(bf16_u16 << 16) };
+
+        src_ptr = unsafe { src_ptr.add(2) };
+        dst_ptr = unsafe { dst_ptr.add(1) };
+    }
+}
+
 /// Computes RMS of `x`.
 ///
 /// # Safety

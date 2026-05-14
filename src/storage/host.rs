@@ -6,13 +6,68 @@ pub(crate) struct Host {
     data: mmap::Mmap,
 }
 
-impl Host {
-    pub(crate) fn name(&self) -> &str {
+impl Storage for Host {
+    fn name(&self) -> &str {
         &self.name
     }
 
-    pub(crate) fn as_slice(&self) -> &[u8] {
+    fn as_slice(&self) -> &[u8] {
         self.data.as_slice()
+    }
+
+    fn as_ptr(&self) -> *const u8 {
+        self.data.as_ptr()
+    }
+
+    fn as_mut_ptr(&mut self) -> Result<*mut u8, crate::Error> {
+        self.data
+            .as_mut_ptr()
+            .map_err(|err| crate::Error::io(&self.name, err))
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn memory_copy(
+        &mut self,
+        dst_offset: usize,
+        src: &Self,
+        src_offset: usize,
+        len: usize,
+    ) -> Result<(), crate::Error> {
+        if src_offset + len > src.data.len() {
+            return Err(crate::Error::out_of_bound(src_offset + len, src.data.len()));
+        }
+
+        if dst_offset + len > self.data.len() {
+            return Err(crate::Error::shape_mismatch(
+                dst_offset + len,
+                self.data.len(),
+            ));
+        }
+
+        unsafe {
+            let dst_ptr =
+                self.data
+                    .as_mut_ptr()
+                    .map_err(|err| crate::Error::io(&self.name, err))? as *mut u8;
+            let src_ptr = src.as_slice().as_ptr().add(src_offset);
+            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_offset), len);
+        }
+
+        Ok(())
+    }
+}
+
+impl Host {
+    pub(crate) fn new(name: &str, capacity: usize) -> Result<Self, crate::Error> {
+        let data = mmap::Mmap::new(capacity).map_err(|err| crate::Error::io(name, err))?;
+
+        Ok(Self {
+            name: name.to_string(),
+            data,
+        })
     }
 }
 
@@ -33,11 +88,9 @@ impl TryFrom<&str> for Host {
     }
 }
 
-impl Storage for Host {}
-
 #[cfg(test)]
 mod tests {
-    use super::Host;
+    use super::{Host, Storage};
 
     const UNICODE_PATH: &str = "model/UnicodeData.txt";
 
@@ -64,6 +117,7 @@ mod mmap {
     }
 
     enum MmapType {
+        #[allow(unused)]
         ReadOnlyFile(File),
         #[allow(unused)]
         WritableFile(File),
