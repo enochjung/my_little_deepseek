@@ -63,6 +63,14 @@ impl Error {
             },
         }
     }
+
+    pub(crate) fn operation_not_supported(operation: &str) -> Self {
+        Self {
+            kind: ErrorKind::OperationNotSupported {
+                operation: operation.to_string(),
+            },
+        }
+    }
 }
 
 impl std::error::Error for Error {}
@@ -83,6 +91,7 @@ enum ErrorKind {
     ShapeMismatch { expected: usize, actual: usize },
     OutOfBound { index: usize, limit: usize },
     ConfigureFailed { field: String },
+    OperationNotSupported { operation: String },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -106,6 +115,9 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::ConfigureFailed { field } => {
                 write!(f, "configuration failed at {field}")
+            }
+            Self::OperationNotSupported { operation } => {
+                write!(f, "operation not supported: {operation}")
             }
         }
     }

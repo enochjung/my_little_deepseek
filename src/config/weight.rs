@@ -1,19 +1,13 @@
 use super::Format;
+use crate::model::WeightInfo;
 use crate::storage::Host;
-use std::ops::Range;
 
 pub enum WeightFormat<'a> {
     Safetensor { path: &'a str },
 }
 
-pub(crate) struct TensorInfo {
-    pub(crate) name: String,
-    pub(crate) shape: Vec<u32>,
-    pub(crate) offset: Range<usize>,
-}
-
 impl Format for WeightFormat<'_> {
-    type Output<'a> = TensorInfo;
+    type Output<'a> = WeightInfo;
     type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
     fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
@@ -27,12 +21,12 @@ impl Format for WeightFormat<'_> {
 }
 
 mod safetensor {
-    use super::TensorInfo;
-    use crate::storage::Host;
+    use super::WeightInfo;
+    use crate::storage::{Host, Storage};
 
     const HLEN_END_OFFSET: usize = 8;
 
-    pub fn parse(file: &Host) -> Box<dyn Iterator<Item = TensorInfo> + '_> {
+    pub fn parse(file: &Host) -> Box<dyn Iterator<Item = WeightInfo> + '_> {
         let raw = file.as_slice();
 
         let (header_start, weight_start) = section_offsets(raw);
@@ -153,7 +147,7 @@ mod safetensor {
         res
     }
 
-    fn parse_tensor_info(section: Section, additional_offset: usize) -> TensorInfo {
+    fn parse_tensor_info(section: Section, additional_offset: usize) -> WeightInfo {
         let name = str::from_utf8(section.name).unwrap().to_string();
         let mut parser = SectionIter::new(section.body);
 
@@ -169,7 +163,7 @@ mod safetensor {
         let offset = parse_array(section_offsets.body);
         let offset = (offset[0] + additional_offset)..(offset[1] + additional_offset);
 
-        TensorInfo {
+        WeightInfo {
             name,
             shape,
             offset,
@@ -180,12 +174,13 @@ mod safetensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ops::Range;
 
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
     const OFFSET: usize = 38621;
 
     fn assert(
-        tensor_info: &[TensorInfo],
+        tensor_info: &[WeightInfo],
         tensor_name: &str,
         expected_shape: &[u32],
         expected_offset: Range<usize>,
@@ -209,7 +204,7 @@ mod tests {
         panic!("tensor '{}' missing", tensor_name);
     }
 
-    fn get_tensor_info() -> Vec<TensorInfo> {
+    fn get_tensor_info() -> Vec<WeightInfo> {
         let weight_format = WeightFormat::Safetensor { path: WEIGHT_PATH };
         let (file, parse) = weight_format
             .read()
