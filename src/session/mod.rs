@@ -27,7 +27,7 @@ impl<'a> Session<'a> {
         self.tokens.push(special_token::THINK_START);
 
         let capacity = self.tokens.len() * self.model.hidden_size as usize;
-        let mut embedded_storage = Host::new("embedded storage", capacity)?;
+        let embedded_storage = Host::new("embedded storage", capacity)?;
         let mut embedded_tensor =
             TensorOwn::<F32, Host>::new(embedded_storage, true, 0, self.model.hidden_size)?;
 

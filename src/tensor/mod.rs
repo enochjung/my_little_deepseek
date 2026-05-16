@@ -1,6 +1,6 @@
 mod numeric;
 
-use crate::kernel::x86_64::cast_bf16_to_f32;
+use crate::kernel::x86_64;
 use crate::storage::*;
 use core::marker::PhantomData;
 pub(crate) use numeric::*;
@@ -482,7 +482,7 @@ impl<'a, T: Tensor<BF16, Host>> From<&T> for TensorOwn<F32, Host> {
         let storage = Host::new(&name, total * F32::BYTES)
             .expect("creating host storage for bf16->f32 conversion should succeed");
 
-        unsafe { cast_bf16_to_f32(storage.as_ptr() as *mut f32, src.as_ptr(), total) };
+        unsafe { x86_64::cast_bf16_to_f32_n_n(storage.as_ptr() as *mut f32, src.as_ptr(), total) };
 
         TensorOwn::new(storage, true, nrow, ncol)
             .expect("converted bf16 tensor should fit in its destination storage")
@@ -490,16 +490,81 @@ impl<'a, T: Tensor<BF16, Host>> From<&T> for TensorOwn<F32, Host> {
 }
 
 impl TensorOwn<F32, Host> {
-    pub(crate) fn silu(&mut self) -> () {
-        todo!()
+    pub(crate) fn residual(&mut self, other: &TensorOwn<F32, Host>) -> Result<(), crate::Error> {
+        if self.layout.nrow != other.layout.nrow {
+            return Err(crate::Error::shape_mismatch(
+                self.layout.nrow as usize,
+                other.layout.nrow as usize,
+            ));
+        }
+        if self.layout.ncol != other.layout.ncol {
+            return Err(crate::Error::shape_mismatch(
+                self.layout.ncol as usize,
+                other.layout.ncol as usize,
+            ));
+        }
+        if self.layout.is_row_major != other.layout().is_row_major {
+            return Err(crate::Error::operation_not_supported(
+                "residual with mismatched tensor layout majority (row-major vs col-major)",
+            ));
+        }
+
+        let n = self.layout.nrow as usize * self.layout.ncol as usize;
+        if n == 0 {
+            return Ok(());
+        }
+
+        let y = self.as_mut_ptr()? as *mut f32;
+        let x = other.as_ptr() as *const f32;
+
+        unsafe { x86_64::add_n_n(y, x, n) };
+
+        Ok(())
     }
 
-    pub(crate) fn rms_norm(
+    pub(crate) fn silu(&mut self) -> Result<(), crate::Error> {
+        let n = self.layout.ncol as usize;
+        let x = self.as_mut_ptr()? as *mut f32;
+
+        unsafe { x86_64::silu_n(x, n) };
+
+        Ok(())
+    }
+
+    pub(crate) fn rms_norm<T: Tensor<F32, Host>>(
         &mut self,
-        weight: &TensorRef<'_, F32, Host>,
+        weight: &T,
         epsilon: f32,
     ) -> Result<(), crate::Error> {
-        todo!()
+        if self.layout.is_row_major != true {
+            return Err(crate::Error::operation_not_supported(
+                "rms norm with column-major",
+            ));
+        }
+
+        if self.layout.ncol != weight.shape()[1] {
+            return Err(crate::Error::shape_mismatch(
+                self.layout.ncol as usize,
+                weight.shape()[1] as usize,
+            ));
+        }
+        if weight.shape()[0] != 1 {
+            return Err(crate::Error::shape_mismatch(1, weight.shape()[0] as usize));
+        }
+
+        let mut y_ptr = self.as_mut_ptr()? as *mut f32;
+        let x_ptr = weight.as_ptr() as *const f32;
+        let n = self.layout.ncol as usize;
+
+        for _ in 0..self.layout.nrow as usize {
+            let rms = unsafe { x86_64::rms_n(y_ptr as *const f32, n) };
+            let scale = 1.0 / (rms + epsilon);
+            unsafe { x86_64::mul_n_n(y_ptr, x_ptr, scale, n) };
+
+            y_ptr = unsafe { y_ptr.add(self.layout.stride as usize) };
+        }
+
+        Ok(())
     }
 
     pub(crate) fn muladd_weight_bias(
@@ -507,6 +572,50 @@ impl TensorOwn<F32, Host> {
         weight: &TensorRef<'_, F32, Host>,
         bias: &TensorRef<'_, F32, Host>,
     ) -> Result<(), crate::Error> {
+        // TODO: review
         todo!()
+        /*
+        let [nrow, ncol] = self.shape();
+        let weight_shape = weight.shape();
+        let bias_shape = bias.shape();
+
+        if weight_shape[0] != ncol || weight_shape[1] != ncol {
+            return Err(crate::Error::shape_mismatch(
+                ncol as usize,
+                weight_shape[1] as usize,
+            ));
+        }
+
+        if bias_shape[1] != ncol {
+            return Err(crate::Error::shape_mismatch(
+                ncol as usize,
+                bias_shape[1] as usize,
+            ));
+        }
+
+        let source = self.clone();
+        let source_ptr = source.as_ptr() as *const f32;
+        let weight_ptr = weight.as_ptr() as *const f32;
+        let bias_ptr = bias.as_ptr() as *const f32;
+        let target_ptr = self.as_mut_ptr()? as *mut f32;
+
+        for row_idx in 0..nrow as usize {
+            let source_row = unsafe { source_ptr.add(row_idx * ncol as usize) };
+            let target_row = unsafe { target_ptr.add(row_idx * ncol as usize) };
+
+            for out_col in 0..ncol as usize {
+                let mut acc = unsafe { *bias_ptr.add(out_col) };
+                let weight_row = unsafe { weight_ptr.add(out_col * ncol as usize) };
+
+                for in_col in 0..ncol as usize {
+                    acc += unsafe { *source_row.add(in_col) * *weight_row.add(in_col) };
+                }
+
+                unsafe { *target_row.add(out_col) = acc };
+            }
+        }
+
+        Ok(())
+        */
     }
 }
