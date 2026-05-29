@@ -114,15 +114,14 @@ fn new_mmap(fd: i32, len: usize, readonly: bool) -> Result<*const (), std::io::E
         ));
     }
 
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 {
-        return Err(std::io::Error::last_os_error());
-    }
     let prot = match readonly {
         true => libc::PROT_READ,
         false => libc::PROT_READ | libc::PROT_WRITE,
     };
-    let flags = libc::MAP_PRIVATE;
+    let flags = match readonly {
+        true => libc::MAP_PRIVATE,
+        false => libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+    };
     let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, fd, 0) };
     if ptr == libc::MAP_FAILED {
         return Err(std::io::Error::last_os_error());
