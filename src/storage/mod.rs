@@ -1,18 +1,32 @@
-mod host;
+mod mmap;
 
-pub(crate) use host::Host;
+pub(crate) use mmap::{Mmap, MmapMut};
 
 pub(crate) trait Storage {
-    fn name(&self) -> &str;
-    fn as_slice(&self) -> &[u8];
-    fn as_ptr(&self) -> *const u8;
-    fn as_mut_ptr(&mut self) -> Result<*mut u8, crate::Error>;
     fn len(&self) -> usize;
-    fn memory_copy(
-        &mut self,
-        dst_offset: usize,
-        src: &Self,
-        src_offset: usize,
-        len: usize,
-    ) -> Result<(), crate::Error>;
+    fn as_ptr(&self) -> *const ();
+}
+impl Storage for Mmap {
+    fn len(&self) -> usize {
+        self.len()
+    }
+    fn as_ptr(&self) -> *const () {
+        self.as_ptr()
+    }
+}
+impl Storage for MmapMut {
+    fn len(&self) -> usize {
+        self.len()
+    }
+    fn as_ptr(&self) -> *const () {
+        self.as_ptr()
+    }
+}
+impl<'a> Storage for &'a Mmap {
+    fn len(&self) -> usize {
+        (*self).len()
+    }
+    fn as_ptr(&self) -> *const () {
+        (*self).as_ptr()
+    }
 }

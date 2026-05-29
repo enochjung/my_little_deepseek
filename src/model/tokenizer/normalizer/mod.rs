@@ -267,19 +267,30 @@ impl ExclusionMap {
 mod tests {
     use super::Normalizer;
     use crate::config::{CompositionExclusionFormat, UnicodeFormat};
+    use std::sync::OnceLock;
 
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
     const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
 
+    static PRECOMPUTED_NORMALIZER: OnceLock<Normalizer> = OnceLock::new();
+
+    fn get_normalizer() -> &'static Normalizer {
+        PRECOMPUTED_NORMALIZER.get_or_init(|| {
+            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
+            let composition_exclusion_format =
+                CompositionExclusionFormat::UnicodeCharacterDatabase {
+                    path: COMPOSITION_EXCLUSION_PATH,
+                };
+            Normalizer::new(&unicode_format, &composition_exclusion_format)
+                .expect("initializing normalizer should succeed")
+        })
+    }
+
     fn assert(input: &str, expected: &str) {
         assert_ne!(input, expected, "invalid test data: {:?}", input);
 
-        let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
-        let composition_exclusion_format = CompositionExclusionFormat::UnicodeCharacterDatabase {
-            path: COMPOSITION_EXCLUSION_PATH,
-        };
-        let normalizer = Normalizer::new(&unicode_format, &composition_exclusion_format)
-            .expect("initializing normalizer should succeed");
+        let normalizer = get_normalizer();
+
         let actual = normalizer
             .normalize(input)
             .expect("normalization should succeed");

@@ -1,6 +1,6 @@
 use super::Format;
 use crate::model::WeightInfo;
-use crate::storage::Host;
+use crate::storage::Mmap;
 
 pub enum WeightFormat<'a> {
     Safetensor { path: &'a str },
@@ -8,12 +8,12 @@ pub enum WeightFormat<'a> {
 
 impl Format for WeightFormat<'_> {
     type Output<'a> = WeightInfo;
-    type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
         match self {
             &WeightFormat::Safetensor { path } => {
-                let file = Host::try_from(path)?;
+                let file = Mmap::new(path)?;
                 Ok((file, safetensor::parse))
             }
         }
@@ -22,11 +22,11 @@ impl Format for WeightFormat<'_> {
 
 mod safetensor {
     use super::WeightInfo;
-    use crate::storage::{Host, Storage};
+    use crate::storage::Mmap;
 
     const HLEN_END_OFFSET: usize = 8;
 
-    pub fn parse(file: &Host) -> Box<dyn Iterator<Item = WeightInfo> + '_> {
+    pub fn parse(file: &Mmap) -> Box<dyn Iterator<Item = WeightInfo> + '_> {
         let raw = file.as_slice();
 
         let (header_start, weight_start) = section_offsets(raw);
@@ -174,51 +174,50 @@ mod safetensor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::ops::Range;
+    use std::sync::OnceLock;
 
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
     const OFFSET: usize = 38621;
 
-    fn assert(
-        tensor_info: &[WeightInfo],
-        tensor_name: &str,
-        expected_shape: &[u32],
-        expected_offset: Range<usize>,
-    ) {
-        for info in tensor_info {
-            if info.name == tensor_name {
-                assert_eq!(
-                    info.shape, expected_shape,
-                    "actual: {:?}, expected: {:?}",
-                    info.shape, expected_shape
-                );
-                assert_eq!(
-                    info.offset, expected_offset,
-                    "actual: {:?}, expected: {:?}",
-                    info.offset, expected_offset
-                );
-                return;
-            }
+    static PRECOMPUTED_TENSOR_INFO: OnceLock<HashMap<String, WeightInfo>> = OnceLock::new();
+
+    fn get_tensor_info() -> &'static HashMap<String, WeightInfo> {
+        PRECOMPUTED_TENSOR_INFO.get_or_init(|| {
+            let weight_format = WeightFormat::Safetensor { path: WEIGHT_PATH };
+            let (file, parse) = weight_format
+                .read()
+                .expect("reading weight format should succeed");
+
+            let iter = parse(&file);
+            iter.map(|w| (w.name.clone(), w)).collect()
+        })
+    }
+
+    fn assert(tensor_name: &str, expected_shape: &[u32], expected_offset: Range<usize>) {
+        let tensor_info = get_tensor_info();
+
+        if let Some(info) = tensor_info.get(tensor_name) {
+            assert_eq!(
+                info.shape, expected_shape,
+                "actual: {:?}, expected: {:?}",
+                info.shape, expected_shape
+            );
+            assert_eq!(
+                info.offset, expected_offset,
+                "actual: {:?}, expected: {:?}",
+                info.offset, expected_offset
+            );
+            return;
         }
 
         panic!("tensor '{}' missing", tensor_name);
     }
 
-    fn get_tensor_info() -> Vec<WeightInfo> {
-        let weight_format = WeightFormat::Safetensor { path: WEIGHT_PATH };
-        let (file, parse) = weight_format
-            .read()
-            .expect("reading weight format should succeed");
-
-        let iter = parse(&file);
-        iter.collect()
-    }
-
     #[test]
     fn case01_text_embed_tokens_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.embed_tokens.weight",
             &[151936, 1536],
             0 + OFFSET..466747392 + OFFSET,
@@ -227,9 +226,7 @@ mod tests {
 
     #[test]
     fn case02_text_q_proj_bias() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.0.self_attn.q_proj.bias",
             &[1536],
             466747392 + OFFSET..466750464 + OFFSET,
@@ -238,9 +235,7 @@ mod tests {
 
     #[test]
     fn case03_text_k_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.1.self_attn.k_proj.weight",
             &[256, 1536],
             565065728 + OFFSET..565852160 + OFFSET,
@@ -249,9 +244,7 @@ mod tests {
 
     #[test]
     fn case04_text_v_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.2.self_attn.v_proj.weight",
             &[256, 1536],
             659447808 + OFFSET..660234240 + OFFSET,
@@ -260,9 +253,7 @@ mod tests {
 
     #[test]
     fn case05_text_o_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.3.self_attn.o_proj.weight",
             &[1536, 1536],
             753829888 + OFFSET..758548480 + OFFSET,
@@ -271,9 +262,7 @@ mod tests {
 
     #[test]
     fn case06_text_gate_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.4.mlp.gate_proj.weight",
             &[8960, 1536],
             852144128 + OFFSET..879669248 + OFFSET,
@@ -282,9 +271,7 @@ mod tests {
 
     #[test]
     fn case07_text_up_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.5.mlp.up_proj.weight",
             &[8960, 1536],
             973264896 + OFFSET..1000790016 + OFFSET,
@@ -293,9 +280,7 @@ mod tests {
 
     #[test]
     fn case08_text_down_proj_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.6.mlp.down_proj.weight",
             &[1536, 8960],
             1094385664 + OFFSET..1121910784 + OFFSET,
@@ -304,9 +289,7 @@ mod tests {
 
     #[test]
     fn case09_text_input_layernorm_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.7.input_layernorm.weight",
             &[1536],
             1215506432 + OFFSET..1215509504 + OFFSET,
@@ -315,9 +298,7 @@ mod tests {
 
     #[test]
     fn case10_text_post_attention_layernorm_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.layers.27.post_attention_layernorm.weight",
             &[1536],
             3087422464 + OFFSET..3087425536 + OFFSET,
@@ -326,9 +307,7 @@ mod tests {
 
     #[test]
     fn case11_text_norm_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "model.norm.weight",
             &[1536],
             3087425536 + OFFSET..3087428608 + OFFSET,
@@ -337,9 +316,7 @@ mod tests {
 
     #[test]
     fn case12_text_lm_head_weight() {
-        let tensor_info = get_tensor_info();
         assert(
-            &tensor_info,
             "lm_head.weight",
             &[151936, 1536],
             3087428608 + OFFSET..3554176000 + OFFSET,

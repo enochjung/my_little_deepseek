@@ -4,7 +4,7 @@ mod unicode;
 mod vocab;
 mod weight;
 
-use crate::storage::Host;
+use crate::storage::Mmap;
 pub use composition_exclusion::CompositionExclusionFormat;
 pub use merge::MergeFormat;
 pub use unicode::UnicodeFormat;
@@ -86,9 +86,9 @@ impl<'a> Configure<'a> {
 
 pub(crate) trait Format {
     type Output<'a>;
-    type Parser: for<'a> Fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser: for<'a> Fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error>;
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error>;
 }
 
 fn parse_hex_u32(text: &[u8]) -> u32 {

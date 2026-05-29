@@ -1,5 +1,5 @@
 use super::{Format, parse_hex_u32, parse_u8};
-use crate::storage::{Host, Storage};
+use crate::storage::Mmap;
 
 pub enum UnicodeFormat<'a> {
     UnicodeCharacterDatabase { path: &'a str },
@@ -13,20 +13,19 @@ pub(crate) struct UCDLine {
 
 impl Format for UnicodeFormat<'_> {
     type Output<'a> = Result<UCDLine, crate::Error>;
-    type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
         match self {
             &UnicodeFormat::UnicodeCharacterDatabase { path } => {
-                let file = Host::try_from(path)?;
+                let file = Mmap::new(path)?;
                 Ok((file, parse_ucd))
             }
         }
     }
 }
 
-fn parse_ucd(file: &Host) -> Box<dyn Iterator<Item = Result<UCDLine, crate::Error>> + '_> {
-    let path = file.name();
+fn parse_ucd(file: &Mmap) -> Box<dyn Iterator<Item = Result<UCDLine, crate::Error>> + '_> {
     let lines = file.as_slice().split(|&x| x == b'\n');
 
     let iter = lines
@@ -34,16 +33,16 @@ fn parse_ucd(file: &Host) -> Box<dyn Iterator<Item = Result<UCDLine, crate::Erro
         .filter(|(_, text)| !text.is_empty())
         .map(|(idx, text)| {
             let line_no = idx + 1;
-            parse_ucd_line(text, path, line_no)
+            parse_ucd_line(text, line_no)
         });
 
     Box::new(iter)
 }
 
-fn parse_ucd_line(text: &[u8], path: &str, line_no: usize) -> Result<UCDLine, crate::Error> {
+fn parse_ucd_line(text: &[u8], line_no: usize) -> Result<UCDLine, crate::Error> {
     let fields = text.split(|x| *x == b';').collect::<Vec<_>>();
     if fields.len() != 15 {
-        return Err(crate::Error::broken_data(path, line_no));
+        return Err(crate::Error::broken_data(line_no));
     }
 
     let codepoint = parse_hex_u32(fields[0]);

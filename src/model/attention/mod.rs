@@ -1,55 +1,34 @@
 use super::AttentionLayerWeightInfo;
-use super::RMSNormalizer;
+use super::{RMSNormalizer, build_tensor_f32};
 use crate::storage::*;
 use crate::tensor::*;
 
-pub(crate) struct Attention<N: Numeric, S: Storage> {
-    q_bias: TensorOwn<N, S>,
-    q_weight: TensorOwn<N, S>,
-    k_bias: TensorOwn<N, S>,
-    k_weight: TensorOwn<N, S>,
-    v_bias: TensorOwn<N, S>,
-    v_weight: TensorOwn<N, S>,
-    o_weight: TensorOwn<N, S>,
-    rms_normalizer: RMSNormalizer<N, S>,
+pub(crate) struct Attention<'a, E: ElemType, L: Location>
+where
+    Own: StorageType<'a, L>,
+{
+    q_bias: Tensor<'a, Own, E, L>,
+    q_weight: Tensor<'a, Own, E, L>,
+    k_bias: Tensor<'a, Own, E, L>,
+    k_weight: Tensor<'a, Own, E, L>,
+    v_bias: Tensor<'a, Own, E, L>,
+    v_weight: Tensor<'a, Own, E, L>,
+    o_weight: Tensor<'a, Own, E, L>,
+    rms_normalizer: RMSNormalizer<'a, E, L>,
 }
 
-impl Attention<F32, Host> {
+impl Attention<'_, F32, Host> {
     pub(crate) fn new(
-        weight_storage: &Host,
+        weight_storage: &Mmap,
         attention_weight_info: &AttentionLayerWeightInfo,
     ) -> Result<Self, crate::Error> {
-        let q_bias = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.q_proj_bias,
-        ))?);
-        let q_weight = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.q_proj_weight,
-        ))?);
-
-        let k_bias = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.k_proj_bias,
-        ))?);
-        let k_weight = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.k_proj_weight,
-        ))?);
-
-        let v_bias = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.v_proj_bias,
-        ))?);
-        let v_weight = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.v_proj_weight,
-        ))?);
-
-        let o_weight = TensorOwn::<F32, Host>::from(&TensorRef::<BF16, Host>::try_from((
-            weight_storage,
-            &attention_weight_info.o_proj_weight,
-        ))?);
+        let q_bias = build_tensor_f32(weight_storage, &attention_weight_info.q_proj_bias)?;
+        let q_weight = build_tensor_f32(weight_storage, &attention_weight_info.q_proj_weight)?;
+        let k_bias = build_tensor_f32(weight_storage, &attention_weight_info.k_proj_bias)?;
+        let k_weight = build_tensor_f32(weight_storage, &attention_weight_info.k_proj_weight)?;
+        let v_bias = build_tensor_f32(weight_storage, &attention_weight_info.v_proj_bias)?;
+        let v_weight = build_tensor_f32(weight_storage, &attention_weight_info.v_proj_weight)?;
+        let o_weight = build_tensor_f32(weight_storage, &attention_weight_info.o_proj_weight)?;
 
         let rms_normalizer = RMSNormalizer::new(
             weight_storage,
@@ -70,8 +49,8 @@ impl Attention<F32, Host> {
 
     pub(crate) fn apply_attention(
         &self,
-        target: &mut TensorOwn<F32, Host>,
-        rms_norm_epsilon: f32,
+        _target: &mut Tensor<'_, Mut, F32, Host>,
+        _rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {
         todo!()
         /*

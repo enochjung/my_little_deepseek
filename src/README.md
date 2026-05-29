@@ -22,7 +22,3 @@ This directory contains the implementation split by responsibility.
 ## Quick Flow
 
 `config` -> `model` -> `session` -> `tensor` -> `storage` / `kernel`
-
-## Module Notes
-
-See the README in each subdirectory for the local details of that module.
