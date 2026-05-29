@@ -14,7 +14,7 @@ use std::arch::x86_64::*;
 /// - `dst` must be valid for writes of `len` bytes.
 /// - Source and destination ranges must not overlap.
 pub(crate) unsafe fn copy(dst: *mut (), src: *const (), len: usize) -> () {
-    unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
+    unsafe { std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, len) };
 }
 
 /// Casts `n` BF16 values from `src` into `dst` as `f32`.

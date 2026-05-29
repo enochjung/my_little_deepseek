@@ -561,9 +561,9 @@ fn validate_shape(
 
 #[cfg(test)]
 impl Tensor<'_, Ref, F32, Host> {
-    pub(crate) fn assert(&self, data: &[f32]) -> () {
+    pub(crate) fn assert(&self, answer: &[f32]) -> () {
         let size = self.layout.nrow as usize * self.layout.ncol as usize;
-        assert_eq!(size, data.len(), "invalid test data");
+        assert_eq!(size, answer.len(), "invalid test data");
 
         let n_lines = self.layout.n_lines();
         let line_elems = self.layout.line_elems();
@@ -572,8 +572,8 @@ impl Tensor<'_, Ref, F32, Host> {
 
         for i in 0..n_lines as usize {
             for j in 0..line_elems as usize {
-                let expected = unsafe { *(ptr.add(i * self.layout.stride as usize + j)) };
-                let actual = data[idx];
+                let expected = answer[idx];
+                let actual = unsafe { *(ptr.add(i * self.layout.stride as usize + j)) };
                 assert!(
                     (actual - expected).abs() < 0.0001,
                     "row {} col {} mismatch: actual {}, expected {}, diff {}",
@@ -597,12 +597,78 @@ impl<N: Numeric, SM: StorageMut> TensorMut<N, SM> {
 }
 */
 
-// TC01
-// test copy. Copy Tensor<Own,F32,Host>[[1, 2, 3], [2, 3, 4]] into Tensor<Mut,F32,Host>[[9, 9, 9, 9], [9, 9, 9, 9], [9, 9, 9, 9]].
-// put at row_idx=1, col_idx=1.
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-// TC02
-// test cast.
+    fn mmap_mut_from_f32(data: &[f32]) -> MmapMut {
+        let len = data.len() * F32::BYTES;
+        let mut mmap = MmapMut::new(len).expect("allocating mmap should succeed");
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), mmap.as_mut_ptr() as *mut f32, data.len())
+        };
+        mmap
+    }
 
-// TC03
-// test rms_norm.
+    fn mmap_mut_from_bf16(data: &[u16]) -> MmapMut {
+        let len = data.len() * BF16::BYTES;
+        let mut mmap = MmapMut::new(len).expect("allocating mmap should succeed");
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), mmap.as_mut_ptr() as *mut u16, data.len())
+        };
+        mmap
+    }
+
+    #[test]
+    fn case01_copy_subtensor() {
+        let src_mem = mmap_mut_from_f32(&[1.0, 2.0, 3.0, 2.0, 3.0, 4.0]);
+        let src = Tensor::<Mut, F32, Host>::new(src_mem, 2, 3, true)
+            .expect("creating source tensor should succeed")
+            .to_readonly();
+
+        let dst_mem =
+            mmap_mut_from_f32(&[9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0]);
+        let mut dst = Tensor::<Mut, F32, Host>::new(dst_mem, 3, 4, true)
+            .expect("creating destination tensor should succeed");
+
+        dst.copy(1, 1, &src)
+            .expect("copying subtensor into destination should succeed");
+
+        dst.slice(0..3, 0..4)
+            .assert(&[9.0, 9.0, 9.0, 9.0, 9.0, 1.0, 2.0, 3.0, 9.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn case02_cast_bf16_to_f32() {
+        let src_mem = mmap_mut_from_bf16(&[0x3f80, 0x4000, 0x4040, 0x4080]);
+        let src = Tensor::<Mut, BF16, Host>::new(src_mem, 2, 2, true)
+            .expect("creating bf16 source tensor should succeed");
+
+        let dst_mem = mmap_mut_from_f32(&[0.0, 0.0, 0.0, 0.0]);
+        let mut dst = Tensor::<Mut, F32, Host>::new(dst_mem, 2, 2, true)
+            .expect("creating f32 destination tensor should succeed");
+
+        dst.cast(&src)
+            .expect("casting bf16 tensor into f32 tensor should succeed");
+
+        dst.slice(0..2, 0..2).assert(&[1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn case03_rms_norm() {
+        let x_mem = mmap_mut_from_f32(&[3.0, 4.0, 0.0, 5.0]);
+        let mut x = Tensor::<Mut, F32, Host>::new(x_mem, 2, 2, true)
+            .expect("creating input tensor for rms_norm should succeed");
+
+        let w_mem = mmap_mut_from_f32(&[2.0, 0.5]);
+        let w = Tensor::<Mut, F32, Host>::new(w_mem, 1, 2, true)
+            .expect("creating rms_norm weight tensor should succeed")
+            .to_readonly();
+
+        x.rms_norm(&w, 0.0)
+            .expect("applying rms_norm should succeed");
+
+        x.slice(0..2, 0..2)
+            .assert(&[1.6970563, 0.56568545, 0.0, 0.70710677]);
+    }
+}
