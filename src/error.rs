@@ -4,29 +4,15 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn io(path: &str, err: std::io::Error) -> Self {
+    pub(crate) fn io(err: std::io::Error) -> Self {
         Self {
-            kind: ErrorKind::Io {
-                path: path.to_string(),
-                err,
-            },
+            kind: ErrorKind::Io { err },
         }
     }
 
-    pub(crate) fn broken_data(path: &str, line: usize) -> Self {
+    pub(crate) fn broken_data(line: usize) -> Self {
         Self {
-            kind: ErrorKind::BrokenData {
-                path: path.to_string(),
-                line,
-            },
-        }
-    }
-
-    pub(crate) fn unknown_format(path: &str) -> Self {
-        Self {
-            kind: ErrorKind::UnknownFormat {
-                path: path.to_string(),
-            },
+            kind: ErrorKind::BrokenData { line },
         }
     }
 
@@ -64,11 +50,17 @@ impl Error {
         }
     }
 
-    pub(crate) fn operation_not_supported(operation: &str) -> Self {
+    pub(crate) fn operation_not_supported(operation: &'static str) -> Self {
         Self {
             kind: ErrorKind::OperationNotSupported {
-                operation: operation.to_string(),
+                operation: operation,
             },
+        }
+    }
+
+    pub(crate) fn insufficient_storage_space(required: usize, actual: usize) -> Self {
+        Self {
+            kind: ErrorKind::InsufficientStorageSpace { required, actual },
         }
     }
 }
@@ -83,25 +75,24 @@ impl std::fmt::Display for Error {
 
 #[derive(Debug)]
 enum ErrorKind {
-    Io { path: String, err: std::io::Error },
-    BrokenData { path: String, line: usize },
-    UnknownFormat { path: String },
+    Io { err: std::io::Error },
+    BrokenData { line: usize },
     DataNotProvided { name: String },
     InvalidChar { codepoint: u32 },
     ShapeMismatch { expected: usize, actual: usize },
     OutOfBound { index: usize, limit: usize },
     ConfigureFailed { field: String },
-    OperationNotSupported { operation: String },
+    OperationNotSupported { operation: &'static str },
+    InsufficientStorageSpace { required: usize, actual: usize },
 }
 
 impl std::fmt::Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io { path, err } => write!(f, "cannot read {path}: {err}"),
-            Self::BrokenData { path, line } => {
-                write!(f, "broken {path} at line {line}")
+            Self::Io { err } => write!(f, "io error : {err}"),
+            Self::BrokenData { line } => {
+                write!(f, "data broken at line {line}")
             }
-            Self::UnknownFormat { path } => write!(f, "unknown {path} format"),
             Self::DataNotProvided { name } => write!(f, "{name} data not provided"),
             Self::InvalidChar { codepoint } => write!(f, "invalid character: U+{:04X}", codepoint),
             Self::ShapeMismatch { expected, actual } => {
@@ -119,6 +110,10 @@ impl std::fmt::Display for ErrorKind {
             Self::OperationNotSupported { operation } => {
                 write!(f, "operation not supported: {operation}")
             }
+            Self::InsufficientStorageSpace { required, actual } => write!(
+                f,
+                "insufficient storage space: required {required} bytes, got {actual} bytes"
+            ),
         }
     }
 }

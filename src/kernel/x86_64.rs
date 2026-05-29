@@ -6,6 +6,17 @@
 
 use std::arch::x86_64::*;
 
+/// Copies `len` bytes from `src` to `dst` without allowing overlap.
+///
+/// # Safety
+///
+/// - `src` must be valid for reads of `len` bytes.
+/// - `dst` must be valid for writes of `len` bytes.
+/// - Source and destination ranges must not overlap.
+pub(crate) unsafe fn copy(dst: *mut (), src: *const (), len: usize) -> () {
+    unsafe { std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, len) };
+}
+
 /// Casts `n` BF16 values from `src` into `dst` as `f32`.
 ///
 /// # Safety
@@ -15,55 +26,50 @@ use std::arch::x86_64::*;
 /// - `dst` and `src` must not overlap.
 /// - `dst` must be 64-byte aligned.
 /// - `src` may be unaligned.
-pub(crate) unsafe fn cast_bf16_to_f32_n_n(dst: *mut f32, src: *const u8, n: usize) -> () {
+pub(crate) unsafe fn cast_bf16_to_f32_n_n(dst: *mut f32, src: *const (), n: usize) -> () {
     if is_x86_feature_detected!("avx512f") {
         unsafe { cast_bf16_to_f32_n_n_avx512(dst, src, n) };
-        return;
+    } else {
+        unsafe { cast_bf16_to_f32_n_n_scalar(dst, src, n) };
     }
-
-    unsafe { cast_bf16_to_f32_n_n_scalar(dst, src, n) };
 }
 
 #[inline]
-unsafe fn cast_bf16_to_f32_n_n_scalar(dst: *mut f32, src: *const u8, n: usize) -> () {
-    let mut src_ptr = src;
-    let mut dst_ptr = dst;
+unsafe fn cast_bf16_to_f32_n_n_scalar(dst: *mut f32, src: *const (), n: usize) -> () {
     let dst_end = unsafe { dst.add(n) };
+    let mut dst = dst;
+    let mut src = src;
 
-    while dst_ptr != dst_end {
-        let bf16_u16 = unsafe { (src_ptr as *const u16).read_unaligned() } as u32;
-        unsafe { *dst_ptr = f32::from_bits(bf16_u16 << 16) };
-
-        src_ptr = unsafe { src_ptr.add(2) };
-        dst_ptr = unsafe { dst_ptr.add(1) };
+    while dst != dst_end {
+        let bf16_u16 = unsafe { (src as *const u16).read_unaligned() } as u32;
+        unsafe { *dst = f32::from_bits(bf16_u16 << 16) };
+        dst = unsafe { dst.add(1) };
+        src = unsafe { src.byte_add(2) };
     }
 }
 
 #[target_feature(enable = "avx512f")]
 #[inline]
-unsafe fn cast_bf16_to_f32_n_n_avx512(dst: *mut f32, src: *const u8, n: usize) -> () {
-    let mut src_ptr = src;
-    let mut dst_ptr = dst;
-
+unsafe fn cast_bf16_to_f32_n_n_avx512(dst: *mut f32, src: *const (), n: usize) -> () {
     let vec_end = unsafe { dst.add(n & !15) };
     let dst_end = unsafe { dst.add(n) };
+    let mut dst = dst;
+    let mut src = src;
 
-    while dst_ptr != vec_end {
-        let bf16_v = unsafe { _mm256_loadu_si256(src_ptr as *const __m256i) };
+    while dst != vec_end {
+        let bf16_v = unsafe { _mm256_loadu_si256(src as *const __m256i) };
         let bits_u32 = _mm512_cvtepu16_epi32(bf16_v);
         let bits_f32 = _mm512_castsi512_ps(_mm512_slli_epi32(bits_u32, 16));
-        unsafe { _mm512_store_ps(dst_ptr, bits_f32) };
-
-        src_ptr = unsafe { src_ptr.add(32) };
-        dst_ptr = unsafe { dst_ptr.add(16) };
+        unsafe { _mm512_store_ps(dst, bits_f32) };
+        dst = unsafe { dst.add(16) };
+        src = unsafe { src.byte_add(32) };
     }
 
-    while dst_ptr != dst_end {
-        let bf16_u16 = unsafe { (src_ptr as *const u16).read_unaligned() } as u32;
-        unsafe { *dst_ptr = f32::from_bits(bf16_u16 << 16) };
-
-        src_ptr = unsafe { src_ptr.add(2) };
-        dst_ptr = unsafe { dst_ptr.add(1) };
+    while dst != dst_end {
+        let bf16_u16 = unsafe { (src as *const u16).read_unaligned() } as u32;
+        unsafe { *dst = f32::from_bits(bf16_u16 << 16) };
+        dst = unsafe { dst.add(1) };
+        src = unsafe { src.byte_add(2) };
     }
 }
 
@@ -76,10 +82,10 @@ unsafe fn cast_bf16_to_f32_n_n_avx512(dst: *mut f32, src: *const u8, n: usize) -
 /// - `n > 0`.
 pub(crate) unsafe fn rms_n(x: *const f32, n: usize) -> f32 {
     if is_x86_feature_detected!("avx512f") {
-        return unsafe { rms_n_avx512(x, n) };
+        unsafe { rms_n_avx512(x, n) }
+    } else {
+        unsafe { rms_n_scalar(x, n) }
     }
-
-    unsafe { rms_n_scalar(x, n) }
 }
 
 #[inline]
@@ -99,11 +105,10 @@ unsafe fn rms_n_scalar(x: *const f32, n: usize) -> f32 {
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn rms_n_avx512(x: *const f32, n: usize) -> f32 {
-    let mut ptr = x;
-    let mut acc = _mm512_setzero_ps();
-
     let vec_end = unsafe { x.add(n & !15) };
     let end = unsafe { x.add(n) };
+    let mut ptr = x;
+    let mut acc = _mm512_setzero_ps();
 
     while ptr != vec_end {
         let xv = unsafe { _mm512_loadu_ps(ptr) };
@@ -132,53 +137,50 @@ unsafe fn rms_n_avx512(x: *const f32, n: usize) -> f32 {
 pub(crate) unsafe fn mul_n_n(y: *mut f32, x: *const f32, alpha: f32, n: usize) -> () {
     if is_x86_feature_detected!("avx512f") {
         unsafe { mul_n_n_avx512(y, x, alpha, n) };
-        return;
+    } else {
+        unsafe { mul_n_n_scalar(y, x, alpha, n) };
     }
-
-    unsafe { mul_n_n_scalar(y, x, alpha, n) };
 }
 
 #[inline]
 unsafe fn mul_n_n_scalar(y: *mut f32, x: *const f32, alpha: f32, n: usize) -> () {
-    let mut y_ptr = y;
-    let mut x_ptr = x;
     let x_end = unsafe { x.add(n) };
+    let mut y = y;
+    let mut x = x;
 
-    while x_ptr != x_end {
-        let yv = unsafe { *y_ptr };
-        let xv = unsafe { *x_ptr };
-        unsafe { *y_ptr = yv * xv * alpha };
-        y_ptr = unsafe { y_ptr.add(1) };
-        x_ptr = unsafe { x_ptr.add(1) };
+    while x != x_end {
+        let yv = unsafe { *y };
+        let xv = unsafe { *x };
+        unsafe { *y = yv * xv * alpha };
+        y = unsafe { y.add(1) };
+        x = unsafe { x.add(1) };
     }
 }
 
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn mul_n_n_avx512(y: *mut f32, x: *const f32, alpha: f32, n: usize) -> () {
-    let mut y_ptr = y;
-    let mut x_ptr = x;
     let alpha_v = _mm512_set1_ps(alpha);
-
     let x_vec_end = unsafe { x.add(n & !15) };
     let x_end = unsafe { x.add(n) };
+    let mut y = y;
+    let mut x = x;
 
-    while x_ptr != x_vec_end {
-        let yv = unsafe { _mm512_loadu_ps(y_ptr as *const f32) };
-        let xv = unsafe { _mm512_loadu_ps(x_ptr) };
+    while x != x_vec_end {
+        let yv = unsafe { _mm512_loadu_ps(y as *const f32) };
+        let xv = unsafe { _mm512_loadu_ps(x) };
         let out = _mm512_mul_ps(yv, _mm512_mul_ps(xv, alpha_v));
-        unsafe { _mm512_storeu_ps(y_ptr, out) };
-
-        y_ptr = unsafe { y_ptr.add(16) };
-        x_ptr = unsafe { x_ptr.add(16) };
+        unsafe { _mm512_storeu_ps(y, out) };
+        y = unsafe { y.add(16) };
+        x = unsafe { x.add(16) };
     }
 
-    while x_ptr != x_end {
-        let yv = unsafe { *y_ptr };
-        let xv = unsafe { *x_ptr };
-        unsafe { *y_ptr = yv * xv * alpha };
-        y_ptr = unsafe { y_ptr.add(1) };
-        x_ptr = unsafe { x_ptr.add(1) };
+    while x != x_end {
+        let yv = unsafe { *y };
+        let xv = unsafe { *x };
+        unsafe { *y = yv * xv * alpha };
+        y = unsafe { y.add(1) };
+        x = unsafe { x.add(1) };
     }
 }
 
@@ -192,48 +194,45 @@ unsafe fn mul_n_n_avx512(y: *mut f32, x: *const f32, alpha: f32, n: usize) -> ()
 pub(crate) unsafe fn add_n_n(y: *mut f32, x: *const f32, n: usize) -> () {
     if is_x86_feature_detected!("avx512f") {
         unsafe { add_n_n_avx512(y, x, n) };
-        return;
+    } else {
+        unsafe { add_n_n_scalar(y, x, n) };
     }
-
-    unsafe { add_n_n_scalar(y, x, n) };
 }
 
 #[inline]
 unsafe fn add_n_n_scalar(y: *mut f32, x: *const f32, n: usize) -> () {
-    let mut y_ptr = y;
-    let mut x_ptr = x;
     let x_end = unsafe { x.add(n) };
+    let mut y = y;
+    let mut x = x;
 
-    while x_ptr != x_end {
-        unsafe { *y_ptr += *x_ptr };
-        y_ptr = unsafe { y_ptr.add(1) };
-        x_ptr = unsafe { x_ptr.add(1) };
+    while x != x_end {
+        unsafe { *y += *x };
+        y = unsafe { y.add(1) };
+        x = unsafe { x.add(1) };
     }
 }
 
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn add_n_n_avx512(y: *mut f32, x: *const f32, n: usize) -> () {
-    let mut y_ptr = y;
-    let mut x_ptr = x;
-
     let x_vec_end = unsafe { x.add(n & !15) };
     let x_end = unsafe { x.add(n) };
+    let mut y = y;
+    let mut x = x;
 
-    while x_ptr != x_vec_end {
-        let yv = unsafe { _mm512_loadu_ps(y_ptr as *const f32) };
-        let xv = unsafe { _mm512_loadu_ps(x_ptr) };
+    while x != x_vec_end {
+        let yv = unsafe { _mm512_loadu_ps(y as *const f32) };
+        let xv = unsafe { _mm512_loadu_ps(x) };
         let out = _mm512_add_ps(yv, xv);
-        unsafe { _mm512_storeu_ps(y_ptr, out) };
-
-        y_ptr = unsafe { y_ptr.add(16) };
-        x_ptr = unsafe { x_ptr.add(16) };
+        unsafe { _mm512_storeu_ps(y, out) };
+        y = unsafe { y.add(16) };
+        x = unsafe { x.add(16) };
     }
 
-    while x_ptr != x_end {
-        unsafe { *y_ptr += *x_ptr };
-        y_ptr = unsafe { y_ptr.add(1) };
-        x_ptr = unsafe { x_ptr.add(1) };
+    while x != x_end {
+        unsafe { *y += *x };
+        y = unsafe { y.add(1) };
+        x = unsafe { x.add(1) };
     }
 }
 
@@ -246,16 +245,15 @@ unsafe fn add_n_n_avx512(y: *mut f32, x: *const f32, n: usize) -> () {
 pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     if is_x86_feature_detected!("avx512f") {
         unsafe { silu_n_avx512(x, n) };
-        return;
+    } else {
+        unsafe { silu_n_scalar(x, n) };
     }
-
-    unsafe { silu_n_scalar(x, n) }
 }
 
 #[inline]
 unsafe fn silu_n_scalar(x: *mut f32, n: usize) -> () {
-    let mut ptr = x;
     let end = unsafe { x.add(n) };
+    let mut ptr = x;
 
     while ptr != end {
         let v = unsafe { *ptr };
@@ -267,16 +265,14 @@ unsafe fn silu_n_scalar(x: *mut f32, n: usize) -> () {
 #[target_feature(enable = "avx512f")]
 #[inline]
 unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
-    let mut ptr = x;
     let vec_end = unsafe { x.add(n & !15) };
     let end = unsafe { x.add(n) };
+    let mut ptr = x;
 
-    // Process blocks of 16 floats. Use a stack temporary to compute exp per-lane.
     while ptr != vec_end {
         let mut tmp: [f32; 16] = [0.0; 16];
         let v = unsafe { _mm512_loadu_ps(ptr) };
         unsafe { _mm512_storeu_ps(tmp.as_mut_ptr(), v) };
-
         for i in 0..16 {
             let vi = tmp[i];
             tmp[i] = vi / (1.0 + (-vi).exp());
@@ -284,7 +280,6 @@ unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
 
         let out_v = unsafe { _mm512_loadu_ps(tmp.as_ptr()) };
         unsafe { _mm512_storeu_ps(ptr, out_v) };
-
         ptr = unsafe { ptr.add(16) };
     }
 
@@ -330,9 +325,9 @@ pub(crate) unsafe fn muladd_1n_nn_1n(
     match (rmc, rma) {
         (true, true) => {
             if is_x86_feature_detected!("avx512f") {
-                unsafe { muladd_r1n_rnn_1n_avx512(c, a, lda, b, buf, n) }
+                unsafe { muladd_r1n_rnn_1n_avx512(c, a, lda, b, buf, n) };
             } else {
-                unsafe { muladd_r1n_rnn_1n_scalar(c, a, lda, b, buf, n) }
+                unsafe { muladd_r1n_rnn_1n_scalar(c, a, lda, b, buf, n) };
             }
         }
         _ => unimplemented!(),
@@ -349,9 +344,9 @@ unsafe fn muladd_r1n_rnn_1n_scalar(
     n: usize,
 ) -> () {
     // Copy `c` into `buf`.
+    let c_src_end = unsafe { c.add(n) };
     let mut c_src = c as *const f32;
     let mut c_dst = buf;
-    let c_src_end = unsafe { c_src.add(n) };
 
     while c_src != c_src_end {
         unsafe { *c_dst = *c_src };

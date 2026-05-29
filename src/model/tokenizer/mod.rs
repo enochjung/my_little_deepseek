@@ -44,27 +44,38 @@ impl Tokenizer {
 mod tests {
     use super::Tokenizer;
     use crate::config::{CompositionExclusionFormat, MergeFormat, UnicodeFormat, VocabFormat};
+    use std::sync::OnceLock;
 
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
     const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
     const MERGE_PATH: &'static str = "model/merges.json";
     const VOCAB_PATH: &'static str = "model/vocab.json";
 
-    fn assert(input: &str, expected: &[u32]) {
-        let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
-        let composition_exclusion_format = CompositionExclusionFormat::UnicodeCharacterDatabase {
-            path: COMPOSITION_EXCLUSION_PATH,
-        };
-        let merge_format = MergeFormat::HuggingFace { path: MERGE_PATH };
-        let vocab_format = VocabFormat::HuggingFace { path: VOCAB_PATH };
+    static PRECOMPUTED_TOKENIZER: OnceLock<Tokenizer> = OnceLock::new();
 
-        let tokenizer = Tokenizer::new(
-            &unicode_format,
-            &composition_exclusion_format,
-            &merge_format,
-            &vocab_format,
-        )
-        .expect("initializing tokenizer should succeed");
+    fn get_tokenizer() -> &'static Tokenizer {
+        PRECOMPUTED_TOKENIZER.get_or_init(|| {
+            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
+            let composition_exclusion_format =
+                CompositionExclusionFormat::UnicodeCharacterDatabase {
+                    path: COMPOSITION_EXCLUSION_PATH,
+                };
+            let merge_format = MergeFormat::HuggingFace { path: MERGE_PATH };
+            let vocab_format = VocabFormat::HuggingFace { path: VOCAB_PATH };
+
+            Tokenizer::new(
+                &unicode_format,
+                &composition_exclusion_format,
+                &merge_format,
+                &vocab_format,
+            )
+            .expect("initializing tokenizer should succeed")
+        })
+    }
+
+    fn assert(input: &str, expected: &[u32]) {
+        let tokenizer = get_tokenizer();
+
         let actual = tokenizer
             .tokenize(input)
             .expect("tokenizing should succeed");

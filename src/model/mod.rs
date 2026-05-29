@@ -13,19 +13,19 @@ use std::collections::HashMap;
 use std::ops::Range;
 use tokenizer::Tokenizer;
 
-pub struct Model {
+pub struct Model<'a> {
     pub(crate) num_hidden_layers: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
 
     tokenizer: Tokenizer,
-    embedding: Embedding<F32, Host>,
-    attentions: Vec<Attention<F32, Host>>,
+    embedding: Embedding<'a, F32, Host>,
+    attentions: Vec<Attention<'a, F32, Host>>,
 }
 
-impl Model {
-    pub fn new<'a>(configure: Configure<'a>) -> Result<Self, crate::Error> {
+impl<'a> Model<'a> {
+    pub fn new<'b>(configure: Configure<'b>) -> Result<Self, crate::Error> {
         let num_hidden_layers = configure.num_hidden_layers;
         let rms_norm_epsilon = configure.rms_norm_epsilon;
         let hidden_size = configure.hidden_size;
@@ -86,36 +86,45 @@ impl Model {
         self.tokenizer.tokenize(input)
     }
 
-    pub(crate) fn append_embedding_vectors(
-        &self,
-        target: &mut TensorOwn<F32, Host>,
+    pub(crate) fn build_embedding_vectors<'b>(
+        &'a self,
         token_ids: &[u32],
-    ) -> Result<(), crate::Error> {
-        for &token_id in token_ids {
+    ) -> Result<Tensor<'b, Mut, F32, Host>, crate::Error> {
+        let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
+        let storage = MmapMut::new(size)?;
+        let mut tensor =
+            Tensor::<Mut, F32, Host>::new(storage, token_ids.len() as u32, self.hidden_size, true)?;
+
+        for i in 0..token_ids.len() {
+            let token_id = token_ids[i];
             let embed_tensor = self.embedding.word_embed(token_id)?;
-            target.append(&embed_tensor)?;
+            tensor.copy(i as u32, 0, &embed_tensor)?;
         }
 
-        Ok(())
+        Ok(tensor)
     }
 
     pub(crate) fn apply_attention(
         &self,
-        target: &mut TensorOwn<F32, Host>,
-        layer_idx: usize,
+        _target: &mut Tensor<Mut, F32, Host>,
+        _tmp: &mut Host,
+        _layer_idx: usize,
     ) -> Result<(), crate::Error> {
-        let cloned = target.clone();
+        todo!()
+        /*
+        let cloned = TensorMut::copy(tmp, 0, target)?;
 
         self.attentions[layer_idx].apply_attention(target, self.rms_norm_epsilon)?;
         target.residual(&cloned)?;
 
         Ok(())
+        */
     }
 
     pub(crate) fn apply_feedforward(
         &self,
-        target: &mut TensorOwn<F32, Host>,
-        layer_idx: usize,
+        _target: &mut Tensor<Mut, F32, Host>,
+        _layer_idx: usize,
     ) -> Result<(), crate::Error> {
         todo!()
 
@@ -148,7 +157,7 @@ impl Model {
 
     pub(crate) fn apply_lm_head(
         &self,
-        target: &mut TensorOwn<F32, Host>,
+        _target: &mut Tensor<Mut, F32, Host>,
     ) -> Result<(), crate::Error> {
         todo!()
 
@@ -158,27 +167,34 @@ impl Model {
     }
 }
 
+fn build_tensor_f32<'a>(
+    storage_bf16: &Mmap,
+    weight_info_bf16: &WeightInfo,
+) -> Result<Tensor<'a, Own, F32, Host>, crate::Error> {
+    let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
+        [] => return Err(crate::Error::broken_data(0)),
+        [ncol] => (1, *ncol),
+        [nrow, ncol] => (*nrow, *ncol),
+        _ => return Err(crate::Error::broken_data(0)),
+    };
+    let tensor_bf16 = Tensor::<Ref, BF16, Host>::new(
+        storage_bf16,
+        weight_info_bf16.offset.start,
+        nrow,
+        ncol,
+        true,
+    )?;
+
+    let storage_f32 = MmapMut::new(nrow as usize * ncol as usize * F32::BYTES)?;
+    let mut tensor_f32 = Tensor::<Mut, F32, Host>::new(storage_f32, nrow, ncol, true)?;
+    tensor_f32.cast(&tensor_bf16)?;
+    Ok(tensor_f32.to_readonly())
+}
+
 pub(crate) struct WeightInfo {
     pub(crate) name: String,
     pub(crate) shape: Vec<u32>,
     pub(crate) offset: Range<usize>,
-}
-
-impl<'a> TryFrom<(&'a Host, &WeightInfo)> for TensorRef<'a, BF16, Host> {
-    type Error = crate::Error;
-
-    fn try_from(value: (&'a Host, &WeightInfo)) -> Result<Self, Self::Error> {
-        let (storage, weight_info) = value;
-
-        let (nrow, ncol) = match weight_info.shape.as_slice() {
-            [] => return Err(crate::Error::broken_data(&weight_info.name, 0)),
-            [ncol] => (1, *ncol),
-            [nrow, ncol] => (*nrow, *ncol),
-            _ => return Err(crate::Error::broken_data(&weight_info.name, 0)),
-        };
-
-        TensorRef::new(storage, weight_info.offset.start, true, nrow, ncol, ncol)
-    }
 }
 
 struct AttentionLayerWeightInfo {
@@ -285,7 +301,7 @@ impl ModelWeightInfo {
         }
 
         if let Some((_, weight)) = weight_info.into_iter().next() {
-            return Err(crate::Error::broken_data(&weight.name, 0));
+            return Err(crate::Error::broken_data(0));
         }
 
         Ok(Self {
@@ -310,7 +326,6 @@ fn take_tensor(
 mod tests {
     use super::Model;
     use crate::config::*;
-    use crate::storage::Host;
     use crate::tensor::*;
 
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
@@ -319,30 +334,27 @@ mod tests {
     const VOCAB_PATH: &'static str = "model/vocab.json";
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
 
-    fn assert_embedding_values(tensor: &TensorOwn<F32, Host>, expected_rows: &[[f32; 5]]) {
-        let ptr = tensor.as_ptr();
-        let shape = tensor.shape();
-        let ncol = shape[1] as usize;
+    fn get_model<'a>() -> Model<'a> {
+        let conf = Configure::new()
+            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
+            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
+                path: COMPOSITION_EXCLUSION_PATH,
+            })
+            .merge_format(MergeFormat::HuggingFace { path: MERGE_PATH })
+            .vocab_format(VocabFormat::HuggingFace { path: VOCAB_PATH })
+            .weight_format(WeightFormat::Safetensor { path: WEIGHT_PATH });
 
-        unsafe {
-            let f32_ptr = ptr as *const f32;
-            for (row_idx, expected_row) in expected_rows.iter().enumerate() {
-                for col_idx in 0..5 {
-                    let offset = row_idx * ncol + col_idx;
-                    let actual = *f32_ptr.add(offset);
-                    let expected = expected_row[col_idx];
-                    assert!(
-                        (actual - expected).abs() < 0.0001,
-                        "row {} col {} mismatch: actual {}, expected {}, diff {}",
-                        row_idx,
-                        col_idx,
-                        actual,
-                        expected,
-                        (actual - expected).abs()
-                    );
-                }
-            }
-        }
+        Model::new(conf).expect("initializing model should succeed")
+    }
+
+    fn assert_embedding_values<'t>(tensor: Tensor<'t, Ref, F32, Host>, expected_rows: &[[f32; 5]]) {
+        let slice_tensor = tensor.slice(0..4, 0..5);
+        let vec = expected_rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .map(|&val| val)
+            .collect::<Vec<_>>();
+        slice_tensor.assert(&vec);
     }
 
     #[test]
@@ -387,28 +399,16 @@ mod tests {
         // Token IDs for "Hello, world!"
         let token_ids = [9707, 11, 1879, 0];
 
-        let conf = Configure::new()
-            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
-            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
-                path: COMPOSITION_EXCLUSION_PATH,
-            })
-            .merge_format(MergeFormat::HuggingFace { path: MERGE_PATH })
-            .vocab_format(VocabFormat::HuggingFace { path: VOCAB_PATH })
-            .weight_format(WeightFormat::Safetensor { path: WEIGHT_PATH });
+        let model = get_model();
 
-        let model = Model::new(conf).expect("initializing model should succeed");
-
-        let mut embed_tensor = TensorOwn::<F32, Host>::new(
-            Host::new("embed_tensor", 4 * 1536 * 4).expect("creating Host should succeed"),
-            true,
-            0,
-            1536,
-        )
-        .expect("creating embedding tensor should succeed");
-        model
-            .append_embedding_vectors(&mut embed_tensor, &token_ids)
+        let embed_tensor = model
+            .build_embedding_vectors(&token_ids)
             .expect("appending embedding vectors should succeed");
 
-        assert_embedding_values(&embed_tensor, &expected_rows);
+        let nrow = token_ids.len() as u32;
+        let ncol = model.hidden_size;
+        let embed_tensor_ref = embed_tensor.slice(0..nrow, 0..ncol);
+
+        assert_embedding_values(embed_tensor_ref, &expected_rows);
     }
 }

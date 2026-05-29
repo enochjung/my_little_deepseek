@@ -1,5 +1,5 @@
 use super::{Format, parse_string_with_escape_sequence};
-use crate::storage::{Host, Storage};
+use crate::storage::Mmap;
 
 pub enum MergeFormat<'a> {
     HuggingFace { path: &'a str },
@@ -7,12 +7,12 @@ pub enum MergeFormat<'a> {
 
 impl Format for MergeFormat<'_> {
     type Output<'a> = Result<(String, String), crate::Error>;
-    type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
         match self {
             &MergeFormat::HuggingFace { path } => {
-                let file = Host::try_from(path)?;
+                let file = Mmap::new(path)?;
                 Ok((file, parse_huggingface))
             }
         }
@@ -20,9 +20,8 @@ impl Format for MergeFormat<'_> {
 }
 
 fn parse_huggingface(
-    file: &Host,
+    file: &Mmap,
 ) -> Box<dyn Iterator<Item = Result<(String, String), crate::Error>> + '_> {
-    let path = file.name();
     let lines = file.as_slice().split(|&x| x == b'\n');
 
     let iter = lines
@@ -30,16 +29,16 @@ fn parse_huggingface(
         .filter(|(_, text)| !text.is_empty() && text[0] == b' ')
         .map(|(idx, text)| {
             let line_no = idx + 1;
-            let merge_line = parse_line(text, path, line_no)?;
+            let merge_line = parse_line(text, line_no)?;
             Ok(merge_line)
         });
 
     Box::new(iter)
 }
 
-fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, String), crate::Error> {
+fn parse_line(text: &[u8], line: usize) -> Result<(String, String), crate::Error> {
     if text.len() < 7 || text[0] != b' ' || text[1] != b' ' || text[2] != b'"' {
-        return Err(crate::Error::broken_data(path, line));
+        return Err(crate::Error::broken_data(line));
     }
 
     let mut cqi = 3;
@@ -53,14 +52,14 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, String), 
             if si == 0 {
                 si = cqi;
             } else {
-                return Err(crate::Error::broken_data(path, line));
+                return Err(crate::Error::broken_data(line));
             }
         }
         cqi += 1;
     }
 
     if text.len() < cqi + 1 || text[cqi] != b'"' || si == 0 {
-        return Err(crate::Error::broken_data(path, line));
+        return Err(crate::Error::broken_data(line));
     }
 
     let left = parse_string_with_escape_sequence(&text[3..si]);

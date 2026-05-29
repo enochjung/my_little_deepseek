@@ -1,16 +1,14 @@
 mod special_token;
 
 use crate::Model;
-use crate::storage::*;
-use crate::tensor::*;
 
 pub struct Session<'a> {
-    model: &'a Model,
+    model: &'a Model<'a>,
     tokens: Vec<u32>,
 }
 
 impl<'a> Session<'a> {
-    pub fn new(model: &'a Model) -> Result<Self, crate::Error> {
+    pub fn new(model: &'a Model<'a>) -> Result<Self, crate::Error> {
         let mut tokens = Vec::new();
         tokens.push(special_token::BEGIN_OF_SENTENCE);
 
@@ -26,13 +24,7 @@ impl<'a> Session<'a> {
         self.tokens.push(special_token::ASSISTANT);
         self.tokens.push(special_token::THINK_START);
 
-        let capacity = self.tokens.len() * self.model.hidden_size as usize;
-        let embedded_storage = Host::new("embedded storage", capacity)?;
-        let mut embedded_tensor =
-            TensorOwn::<F32, Host>::new(embedded_storage, true, 0, self.model.hidden_size)?;
-
-        self.model
-            .append_embedding_vectors(&mut embedded_tensor, &self.tokens)?;
+        let embedded_tensor = self.model.build_embedding_vectors(&self.tokens)?;
 
         todo!()
 

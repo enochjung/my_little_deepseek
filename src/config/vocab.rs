@@ -1,5 +1,5 @@
 use super::{Format, parse_string_with_escape_sequence, parse_u32};
-use crate::storage::{Host, Storage};
+use crate::storage::Mmap;
 
 pub enum VocabFormat<'a> {
     HuggingFace { path: &'a str },
@@ -7,12 +7,12 @@ pub enum VocabFormat<'a> {
 
 impl Format for VocabFormat<'_> {
     type Output<'a> = Result<(String, u32), crate::Error>;
-    type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
         match self {
             &VocabFormat::HuggingFace { path } => {
-                let file = Host::try_from(path)?;
+                let file = Mmap::new(path)?;
                 Ok((file, parse_huggingface))
             }
         }
@@ -20,9 +20,8 @@ impl Format for VocabFormat<'_> {
 }
 
 fn parse_huggingface(
-    file: &Host,
+    file: &Mmap,
 ) -> Box<dyn Iterator<Item = Result<(String, u32), crate::Error>> + '_> {
-    let path = file.name();
     let lines = file.as_slice().split(|&x| x == b'\n');
 
     let iter = lines
@@ -30,16 +29,16 @@ fn parse_huggingface(
         .filter(|(_, text)| !text.is_empty() && text[0] == b' ')
         .map(|(idx, text)| {
             let line_no = idx + 1;
-            let vocab_line = parse_line(text, path, line_no)?;
+            let vocab_line = parse_line(text, line_no)?;
             Ok(vocab_line)
         });
 
     Box::new(iter)
 }
 
-fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, u32), crate::Error> {
+fn parse_line(text: &[u8], line: usize) -> Result<(String, u32), crate::Error> {
     if text.len() < 7 || text[0] != b' ' || text[1] != b' ' || text[2] != b'"' {
-        return Err(crate::Error::broken_data(path, line));
+        return Err(crate::Error::broken_data(line));
     }
 
     let mut cqi = 3;
@@ -54,7 +53,7 @@ fn parse_line(text: &[u8], path: &str, line: usize) -> Result<(String, u32), cra
     }
 
     if text.len() < cqi + 4 || text[cqi] != b'"' || text[cqi + 1] != b':' || text[cqi + 2] != b' ' {
-        return Err(crate::Error::broken_data(path, line));
+        return Err(crate::Error::broken_data(line));
     }
 
     let id = parse_u32(&text[cqi + 3..]);

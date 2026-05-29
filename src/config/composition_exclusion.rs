@@ -1,5 +1,5 @@
 use super::{Format, parse_hex_u32};
-use crate::storage::{Host, Storage};
+use crate::storage::Mmap;
 
 pub enum CompositionExclusionFormat<'a> {
     UnicodeCharacterDatabase { path: &'a str },
@@ -7,19 +7,19 @@ pub enum CompositionExclusionFormat<'a> {
 
 impl Format for CompositionExclusionFormat<'_> {
     type Output<'a> = u32;
-    type Parser = for<'a> fn(&'a Host) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
 
-    fn read(&self) -> Result<(Host, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
         match self {
             &CompositionExclusionFormat::UnicodeCharacterDatabase { path } => {
-                let file = Host::try_from(path)?;
+                let file = Mmap::new(path)?;
                 Ok((file, parse_ucd))
             }
         }
     }
 }
 
-fn parse_ucd(file: &Host) -> Box<dyn Iterator<Item = u32> + '_> {
+fn parse_ucd(file: &Mmap) -> Box<dyn Iterator<Item = u32> + '_> {
     let lines = file.as_slice().split(|&x| x == b'\n');
 
     let iter = lines
