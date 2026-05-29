@@ -79,14 +79,6 @@ impl MmapMut {
     pub(crate) fn as_const_mmap(&self) -> &Mmap {
         unsafe { &*(self as *const MmapMut as *const Mmap) }
     }
-    /*
-    pub(crate) fn to_readonly(self) -> Mmap {
-        let ptr = self.ptr as *const ();
-        let len = self.len;
-        std::mem::forget(self);
-        Mmap { ptr, len }
-    }
-    */
 }
 
 impl From<MmapMut> for Mmap {

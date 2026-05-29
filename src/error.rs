@@ -16,12 +16,6 @@ impl Error {
         }
     }
 
-    pub(crate) fn unknown_format() -> Self {
-        Self {
-            kind: ErrorKind::UnknownFormat,
-        }
-    }
-
     pub(crate) fn data_not_provided(name: &str) -> Self {
         Self {
             kind: ErrorKind::DataNotProvided {
@@ -83,7 +77,6 @@ impl std::fmt::Display for Error {
 enum ErrorKind {
     Io { err: std::io::Error },
     BrokenData { line: usize },
-    UnknownFormat,
     DataNotProvided { name: String },
     InvalidChar { codepoint: u32 },
     ShapeMismatch { expected: usize, actual: usize },
@@ -100,7 +93,6 @@ impl std::fmt::Display for ErrorKind {
             Self::BrokenData { line } => {
                 write!(f, "data broken at line {line}")
             }
-            Self::UnknownFormat => write!(f, "unknown format"),
             Self::DataNotProvided { name } => write!(f, "{name} data not provided"),
             Self::InvalidChar { codepoint } => write!(f, "invalid character: U+{:04X}", codepoint),
             Self::ShapeMismatch { expected, actual } => {

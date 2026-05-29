@@ -86,10 +86,10 @@ impl<'a> Model<'a> {
         self.tokenizer.tokenize(input)
     }
 
-    pub(crate) fn build_embedding_vectors(
+    pub(crate) fn build_embedding_vectors<'b>(
         &'a self,
         token_ids: &[u32],
-    ) -> Result<Tensor<Mut, F32, Host>, crate::Error> {
+    ) -> Result<Tensor<'b, Mut, F32, Host>, crate::Error> {
         let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
         let storage = MmapMut::new(size)?;
         let mut tensor =

@@ -49,8 +49,8 @@ impl Attention<'_, F32, Host> {
 
     pub(crate) fn apply_attention(
         &self,
-        _target: &mut Tensor<'_, Mut, F32, Host>,
-        _rms_norm_epsilon: f32,
+        target: &mut Tensor<'_, Mut, F32, Host>,
+        rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {
         todo!()
         /*

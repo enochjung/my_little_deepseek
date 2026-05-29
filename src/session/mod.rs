@@ -1,7 +1,6 @@
 mod special_token;
 
 use crate::Model;
-use crate::tensor::*;
 
 pub struct Session<'a> {
     model: &'a Model<'a>,
