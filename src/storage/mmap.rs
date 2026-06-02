@@ -1,4 +1,3 @@
-use core::ffi::c_void;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
@@ -123,16 +122,40 @@ fn new_mmap(fd: i32, len: usize, readonly: bool) -> Result<*const (), std::io::E
 }
 
 fn resize_mmap(ptr: *mut (), prev_len: usize, new_len: usize) -> Result<*mut (), std::io::Error> {
-    if new_len == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "mmap length must be greater than zero",
-        ));
+    #[cfg(target_os = "linux")]
+    {
+        if new_len == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "mmap length must be greater than zero",
+            ));
+        }
+        let flags = libc::MREMAP_MAYMOVE;
+        let ptr = unsafe { libc::mremap(ptr as *mut libc::c_void, prev_len, new_len, flags) };
+        if ptr == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(ptr as *mut ())
     }
-    let flags = libc::MREMAP_MAYMOVE;
-    let ptr = unsafe { libc::mremap(ptr as *mut c_void, prev_len, new_len, flags) };
-    if ptr == libc::MAP_FAILED {
-        return Err(std::io::Error::last_os_error());
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        if new_len == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "mmap length must be greater than zero",
+            ));
+        }
+
+        let new_ptr_const = new_mmap(-1, new_len, false)?;
+        let new_ptr = new_ptr_const as *mut u8;
+
+        unsafe {
+            let copy_len = std::cmp::min(prev_len, new_len);
+            std::ptr::copy_nonoverlapping(ptr as *const u8, new_ptr as *mut u8, copy_len);
+            libc::munmap(ptr as *mut libc::c_void, prev_len);
+        }
+
+        Ok(new_ptr as *mut ())
     }
-    Ok(ptr as *mut ())
 }

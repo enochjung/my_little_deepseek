@@ -1,4 +1,4 @@
-use crate::kernel::x86_64;
+use crate::kernel;
 use crate::storage::{Mmap, MmapMut, Storage};
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -280,7 +280,7 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         let mut dst = unsafe { self.data.as_mut_ptr().byte_add(dst_offset) };
         let mut src = unsafe { other.data.as_ptr().byte_add(other.layout.offset) };
         for _ in 0..n_lines {
-            unsafe { x86_64::copy(dst, src, len) };
+            unsafe { kernel::copy(dst, src, len) };
             dst = unsafe { dst.byte_add(dst_stride) };
             src = unsafe { src.byte_add(src_stride) };
         }
@@ -306,14 +306,14 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         let is_src_packed = other.layout.stride == other.layout.line_elems();
         if is_src_packed {
             let n = self.layout.nrow as usize * self.layout.ncol as usize;
-            unsafe { x86_64::cast_bf16_to_f32_n_n(dst, src, n) };
+            unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, n) };
         } else {
             let mut dst = dst;
             let mut src = src;
             let n_lines = self.layout.n_lines();
             let line_elems = self.layout.line_elems();
             for _ in 0..n_lines {
-                unsafe { x86_64::cast_bf16_to_f32_n_n(dst, src, line_elems as usize) };
+                unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, line_elems as usize) };
                 dst = unsafe { dst.add(line_elems as usize) };
                 src = unsafe { src.byte_add(other.layout.stride as usize * BF16::BYTES) };
             }
@@ -433,9 +433,9 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         let mut y = self.data.as_mut_ptr() as *mut f32;
         let x = unsafe { weight.data.as_ptr().byte_add(weight.layout.offset) } as *const f32;
         for _ in 0..n_lines {
-            let rms = unsafe { x86_64::rms_n(y as *const f32, line_elems as usize) };
+            let rms = unsafe { kernel::rms_n(y as *const f32, line_elems as usize) };
             let scale = 1.0 / (rms + epsilon);
-            unsafe { x86_64::mul_n_n(y, x, scale, line_elems as usize) };
+            unsafe { kernel::mul_n_n(y, x, scale, line_elems as usize) };
             y = unsafe { y.add(self.layout.stride as usize) };
         }
         Ok(())
