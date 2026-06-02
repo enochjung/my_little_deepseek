@@ -1,6 +1,7 @@
 use my_little_deepseek::*;
 
 use std::io::Write;
+use std::time::Duration;
 
 const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
 const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
@@ -13,18 +14,26 @@ fn main() {
     std::io::stdout().flush().unwrap();
 
     let conf = config::Configure::new()
-        .unicode_format(config::UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
+        .unicode_format(config::UnicodeFormat::UnicodeCharacterDatabase {
+            path: UNICODE_PATH.to_string(),
+        })
         .composition_exclusion_format(
             config::CompositionExclusionFormat::UnicodeCharacterDatabase {
-                path: COMPOSITION_EXCLUSION_PATH,
+                path: COMPOSITION_EXCLUSION_PATH.to_string(),
             },
         )
-        .merge_format(config::MergeFormat::HuggingFace { path: MERGE_PATH })
-        .vocab_format(config::VocabFormat::HuggingFace { path: VOCAB_PATH })
-        .weight_format(config::WeightFormat::Safetensor { path: WEIGHT_PATH });
+        .merge_format(config::MergeFormat::HuggingFace {
+            path: MERGE_PATH.to_string(),
+        })
+        .vocab_format(config::VocabFormat::HuggingFace {
+            path: VOCAB_PATH.to_string(),
+        })
+        .weight_format(config::WeightFormat::Safetensor {
+            path: WEIGHT_PATH.to_string(),
+        });
 
     let model = Model::new(conf).expect("initializing model should succeed");
-    let mut session = Session::new(&model).expect("generating new session should succeed");
+    let mut session = model.new_session();
 
     println!("done!");
     println!("---------------------------------");
@@ -44,16 +53,29 @@ fn main() {
             break;
         }
 
-        print!("[] Inferencing... ");
         std::io::stdout().flush().unwrap();
+        println!();
 
-        let output = session
-            .send_prompt(input)
-            .expect("inferencing should succeed");
+        let mut decoding_session = session.send_prompt(input);
+        decoding_session.start();
 
-        println!("done!");
+        println!("[Assistant]: ");
 
-        println!("[Assistant]: {output}");
+        loop {
+            if let Some(output) = decoding_session.get_next_string() {
+                print!("{output}");
+                std::io::stdout().flush().unwrap();
+            }
+
+            if decoding_session.is_done() {
+                session = decoding_session.finish_decoding();
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        println!();
     }
 
     println!("---------------------------------");

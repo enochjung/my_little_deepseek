@@ -1,17 +1,17 @@
 use super::{Format, parse_string_with_escape_sequence};
 use crate::storage::Mmap;
 
-pub enum MergeFormat<'a> {
-    HuggingFace { path: &'a str },
+pub enum MergeFormat {
+    HuggingFace { path: String },
 }
 
-impl Format for MergeFormat<'_> {
-    type Output<'a> = Result<(String, String), crate::Error>;
-    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+impl Format for MergeFormat {
+    type Output = Result<(String, String), crate::Error>;
+    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
-        match self {
-            &MergeFormat::HuggingFace { path } => {
+        match &self {
+            MergeFormat::HuggingFace { path } => {
                 let file = Mmap::new(path)?;
                 Ok((file, parse_huggingface))
             }

@@ -4,6 +4,7 @@ mod rms_normalizer;
 mod tokenizer;
 
 use crate::config::{Configure, Format};
+use crate::session::{Ready, Session};
 use crate::storage::*;
 use crate::tensor::*;
 use attention::Attention;
@@ -13,19 +14,19 @@ use std::collections::HashMap;
 use std::ops::Range;
 use tokenizer::Tokenizer;
 
-pub struct Model<'a> {
+pub struct Model {
     pub(crate) num_hidden_layers: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
 
     tokenizer: Tokenizer,
-    embedding: Embedding<'a, F32, Host>,
-    attentions: Vec<Attention<'a, F32, Host>>,
+    embedding: Embedding<F32, Host>,
+    attentions: Vec<Attention<F32, Host>>,
 }
 
-impl<'a> Model<'a> {
-    pub fn new<'b>(configure: Configure<'b>) -> Result<Self, crate::Error> {
+impl Model {
+    pub fn new(configure: Configure) -> Result<Self, crate::Error> {
         let num_hidden_layers = configure.num_hidden_layers;
         let rms_norm_epsilon = configure.rms_norm_epsilon;
         let hidden_size = configure.hidden_size;
@@ -82,14 +83,18 @@ impl<'a> Model<'a> {
         })
     }
 
+    pub fn new_session(&self) -> Session<'_, Ready> {
+        Session::<Ready>::new(self)
+    }
+
     pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
         self.tokenizer.tokenize(input)
     }
 
-    pub(crate) fn build_embedding_vectors<'b>(
-        &'a self,
+    pub(crate) fn build_embedding_vectors(
+        &self,
         token_ids: &[u32],
-    ) -> Result<Tensor<'b, Mut, F32, Host>, crate::Error> {
+    ) -> Result<Tensor<'static, Mut, F32, Host>, crate::Error> {
         let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
         let storage = MmapMut::new(size)?;
         let mut tensor =
@@ -165,6 +170,144 @@ impl<'a> Model<'a> {
         // lm head (lm_head.weight)
         // append embedding if not finished
     }
+
+    /*
+    fn decode_one_step(&mut self, input_token: u32) -> u32 {
+        // 1. Token Embedding
+        // [Shape] input_x: [1, 1536]
+        let mut x: Vector<HIDDEN_SIZE> = weights.embed_tokens[input_token];
+
+        // 2. Transformer Layers 순회 (총 28개 층)
+        for layer in 0..NUM_LAYERS {
+            let residual = x.clone(); // Residual Connection을 위한 저장
+
+            // ========================================================
+            // [Attention Block]
+            // ========================================================
+
+            // ① Pre-RMS Norm
+            // [Shape] norm_x: [1, 1536]
+            let norm_x = rms_norm(&x, &weights.layers[layer].input_layernorm);
+
+            // ② Q, K, V Projection
+            // [Shape] q_proj: [1, 1536] (12 heads * 128)
+            // [Shape] k_proj: [1, 256]  (2 heads * 128)
+            // [Shape] v_proj: [1, 256]  (2 heads * 128)
+            let q_proj = matmul(&norm_x, &weights.layers[layer].q_proj);
+            let k_proj = matmul(&norm_x, &weights.layers[layer].k_proj);
+            let v_proj = matmul(&norm_x, &weights.layers[layer].v_proj);
+
+            // ③ 헤드별로 분할 (Reshape)
+            // [Shape] q: [12, 1, 128]
+            // [Shape] k: [2, 1, 128]
+            // [Shape] v: [2, 1, 128]
+            let mut q = reshape_to_heads::<NUM_Q_HEADS>(&q_proj);
+            let mut k = reshape_to_heads::<NUM_KV_HEADS>(&k_proj);
+            let v = reshape_to_heads::<NUM_KV_HEADS>(&v_proj);
+
+            // ④ RoPE (Rotary Position Embedding) 적용
+            // 주의: RoPE는 Q와 K에만 적용되며, V에는 적용되지 않습니다!
+            // 현재 위치 `current_pos`(N)에 해당하는 회전 변환만 수행합니다.
+            // [Shape] q, k 크기 변동 없음
+            apply_rope_in_place(&mut q, current_pos);
+            apply_rope_in_place(&mut k, current_pos);
+
+            // ⑤ KV Cache 업데이트 및 가져오기 (가장 헷갈려하시는 부분)
+            // 현재 스텝의 K, V를 캐시에 '추가(Append)' 합니다.
+            kv_cache[layer].k_cache.append(k); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
+            kv_cache[layer].v_cache.append(v); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
+
+            // 캐시에서 과거부터 현재까지의 전체 K, V를 가져옵니다.
+            // [Shape] K_past: [2, N+1, 128]
+            // [Shape] V_past: [2, N+1, 128]
+            let k_past = &kv_cache[layer].k_cache;
+            let v_past = &kv_cache[layer].v_cache;
+
+            // ⑥ GQA (Grouped Query Attention) 연산
+            // Qwen2는 Q 헤드 12개, KV 헤드 2개이므로, Q 헤드 6개당 1개의 KV 헤드를 공유합니다.
+            // [Shape] attn_output_heads: [12, 1, 128]
+            let mut attn_output_heads = Tensor3D::<NUM_Q_HEADS, 1, HEAD_DIM>::zeros();
+
+            for q_idx in 0..NUM_Q_HEADS {
+                let kv_idx = q_idx / 6; // 0~5는 kv_idx 0, 6~11은 kv_idx 1 사용
+
+                // Q * K^T
+                // q[q_idx] 크기: [1, 128]
+                // k_past[kv_idx]^T 크기: [128, N+1]
+                // [Shape] scores: [1, N+1]
+                let mut scores = matmul(&q[q_idx], transpose(&k_past[kv_idx]));
+                scores = scale(&scores, 1.0 / sqrt(128.0));
+
+                // Softmax
+                // [Shape] probs: [1, N+1]
+                let probs = softmax(&scores);
+
+                // Probs * V
+                // probs 크기: [1, N+1]
+                // v_past[kv_idx] 크기: [N+1, 128]
+                // [Shape] head_out: [1, 128]
+                attn_output_heads[q_idx] = matmul(&probs, &v_past[kv_idx]);
+            }
+
+            // ⑦ Attention 출력 병합 및 O_proj
+            // [Shape] attn_concat: [1, 1536] (12 * 128)
+            let attn_concat = flatten_heads(&attn_output_heads);
+
+            // [Shape] attn_out: [1, 1536]
+            let attn_out = matmul(&attn_concat, &weights.layers[layer].o_proj);
+
+            // ⑧ 첫 번째 Residual Connection
+            // [Shape] x: [1, 1536]
+            x = add(&residual, &attn_out);
+
+            // ========================================================
+            // [MLP Block (SwiGLU)]
+            // ========================================================
+            let residual_mlp = x.clone();
+
+            // ⑨ Post-Attention RMS Norm
+            // [Shape] norm_x_mlp: [1, 1536]
+            let norm_x_mlp = rms_norm(&x, &weights.layers[layer].post_attention_layernorm);
+
+            // ⑩ Gate & Up Projection (Qwen2는 SwiGLU를 사용)
+            // [Shape] gate_proj: [1, 8960]
+            // [Shape] up_proj: [1, 8960]
+            let gate_proj = matmul(&norm_x_mlp, &weights.layers[layer].gate_proj);
+            let up_proj = matmul(&norm_x_mlp, &weights.layers[layer].up_proj);
+
+            // ⑪ SiLU 활성화 함수 및 요소별 곱셈(Element-wise)
+            // [Shape] activated: [1, 8960]
+            let activated = elementwise_mul(&silu(&gate_proj), &up_proj);
+
+            // ⑫ Down Projection
+            // [Shape] mlp_out: [1, 1536]
+            let mlp_out = matmul(&activated, &weights.layers[layer].down_proj);
+
+            // ⑬ 두 번째 Residual Connection
+            // [Shape] x: [1, 1536]
+            x = add(&residual_mlp, &mlp_out);
+        } // layer 루프 종료
+
+        // ========================================================
+        // [Final Output Block]
+        // ========================================================
+
+        // 3. Final RMS Norm
+        // [Shape] final_x: [1, 1536]
+        let final_x = rms_norm(&x, &weights.norm);
+
+        // 4. LM Head (Vocabulary Projection)
+        // tie_word_embeddings이 false이므로 독립적인 가중치 사용
+        // [Shape] logits: [1, 151936]
+        let logits = matmul(&final_x, &weights.lm_head);
+
+        // 5. Sampling
+        // logits에서 가장 확률이 높은 토큰(Argmax) 또는 샘플링을 통해 다음 토큰 결정
+        let next_token = argmax(&logits);
+
+        next_token
+    }
+    */
 }
 
 fn build_tensor_f32<'a>(
@@ -334,15 +477,23 @@ mod tests {
     const VOCAB_PATH: &'static str = "model/vocab.json";
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
 
-    fn get_model<'a>() -> Model<'a> {
+    fn get_model() -> Model {
         let conf = Configure::new()
-            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
-            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
-                path: COMPOSITION_EXCLUSION_PATH,
+            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase {
+                path: UNICODE_PATH.to_string(),
             })
-            .merge_format(MergeFormat::HuggingFace { path: MERGE_PATH })
-            .vocab_format(VocabFormat::HuggingFace { path: VOCAB_PATH })
-            .weight_format(WeightFormat::Safetensor { path: WEIGHT_PATH });
+            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
+                path: COMPOSITION_EXCLUSION_PATH.to_string(),
+            })
+            .merge_format(MergeFormat::HuggingFace {
+                path: MERGE_PATH.to_string(),
+            })
+            .vocab_format(VocabFormat::HuggingFace {
+                path: VOCAB_PATH.to_string(),
+            })
+            .weight_format(WeightFormat::Safetensor {
+                path: WEIGHT_PATH.to_string(),
+            });
 
         Model::new(conf).expect("initializing model should succeed")
     }

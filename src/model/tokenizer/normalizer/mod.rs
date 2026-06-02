@@ -276,10 +276,12 @@ mod tests {
 
     fn get_normalizer() -> &'static Normalizer {
         PRECOMPUTED_NORMALIZER.get_or_init(|| {
-            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
+            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase {
+                path: UNICODE_PATH.to_string(),
+            };
             let composition_exclusion_format =
                 CompositionExclusionFormat::UnicodeCharacterDatabase {
-                    path: COMPOSITION_EXCLUSION_PATH,
+                    path: COMPOSITION_EXCLUSION_PATH.to_string(),
                 };
             Normalizer::new(&unicode_format, &composition_exclusion_format)
                 .expect("initializing normalizer should succeed")

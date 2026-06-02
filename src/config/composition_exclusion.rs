@@ -1,17 +1,17 @@
 use super::{Format, parse_hex_u32};
 use crate::storage::Mmap;
 
-pub enum CompositionExclusionFormat<'a> {
-    UnicodeCharacterDatabase { path: &'a str },
+pub enum CompositionExclusionFormat {
+    UnicodeCharacterDatabase { path: String },
 }
 
-impl Format for CompositionExclusionFormat<'_> {
-    type Output<'a> = u32;
-    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+impl Format for CompositionExclusionFormat {
+    type Output = u32;
+    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
-        match self {
-            &CompositionExclusionFormat::UnicodeCharacterDatabase { path } => {
+        match &self {
+            CompositionExclusionFormat::UnicodeCharacterDatabase { path } => {
                 let file = Mmap::new(path)?;
                 Ok((file, parse_ucd))
             }

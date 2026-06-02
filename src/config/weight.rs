@@ -2,17 +2,17 @@ use super::Format;
 use crate::model::WeightInfo;
 use crate::storage::Mmap;
 
-pub enum WeightFormat<'a> {
-    Safetensor { path: &'a str },
+pub enum WeightFormat {
+    Safetensor { path: String },
 }
 
-impl Format for WeightFormat<'_> {
-    type Output<'a> = WeightInfo;
-    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+impl Format for WeightFormat {
+    type Output = WeightInfo;
+    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
-        match self {
-            &WeightFormat::Safetensor { path } => {
+        match &self {
+            WeightFormat::Safetensor { path } => {
                 let file = Mmap::new(path)?;
                 Ok((file, safetensor::parse))
             }
@@ -185,7 +185,9 @@ mod tests {
 
     fn get_tensor_info() -> &'static HashMap<String, WeightInfo> {
         PRECOMPUTED_TENSOR_INFO.get_or_init(|| {
-            let weight_format = WeightFormat::Safetensor { path: WEIGHT_PATH };
+            let weight_format = WeightFormat::Safetensor {
+                path: WEIGHT_PATH.to_string(),
+            };
             let (file, parse) = weight_format
                 .read()
                 .expect("reading weight format should succeed");

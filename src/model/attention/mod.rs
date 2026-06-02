@@ -3,21 +3,21 @@ use super::{RMSNormalizer, build_tensor_f32};
 use crate::storage::*;
 use crate::tensor::*;
 
-pub(crate) struct Attention<'a, E: ElemType, L: Location>
+pub(crate) struct Attention<E: ElemType, L: Location>
 where
-    Own: StorageType<'a, L>,
+    Own: StorageType<'static, L>,
 {
-    q_bias: Tensor<'a, Own, E, L>,
-    q_weight: Tensor<'a, Own, E, L>,
-    k_bias: Tensor<'a, Own, E, L>,
-    k_weight: Tensor<'a, Own, E, L>,
-    v_bias: Tensor<'a, Own, E, L>,
-    v_weight: Tensor<'a, Own, E, L>,
-    o_weight: Tensor<'a, Own, E, L>,
-    rms_normalizer: RMSNormalizer<'a, E, L>,
+    q_bias: Tensor<'static, Own, E, L>,
+    q_weight: Tensor<'static, Own, E, L>,
+    k_bias: Tensor<'static, Own, E, L>,
+    k_weight: Tensor<'static, Own, E, L>,
+    v_bias: Tensor<'static, Own, E, L>,
+    v_weight: Tensor<'static, Own, E, L>,
+    o_weight: Tensor<'static, Own, E, L>,
+    rms_normalizer: RMSNormalizer<E, L>,
 }
 
-impl Attention<'_, F32, Host> {
+impl Attention<F32, Host> {
     pub(crate) fn new(
         weight_storage: &Mmap,
         attention_weight_info: &AttentionLayerWeightInfo,
@@ -47,11 +47,14 @@ impl Attention<'_, F32, Host> {
         })
     }
 
-    pub(crate) fn apply_attention(
+    pub(crate) fn apply_attention<'a>(
         &self,
-        target: &mut Tensor<'_, Mut, F32, Host>,
+        target: &mut Tensor<'a, Mut, F32, Host>,
         rms_norm_epsilon: f32,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), crate::Error>
+    where
+        Mut: StorageType<'a, Host>,
+    {
         todo!()
         /*
         self.rms_normalizer.apply_rms_norm(target)?;

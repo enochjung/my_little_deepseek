@@ -55,13 +55,19 @@ mod tests {
 
     fn get_tokenizer() -> &'static Tokenizer {
         PRECOMPUTED_TOKENIZER.get_or_init(|| {
-            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH };
+            let unicode_format = UnicodeFormat::UnicodeCharacterDatabase {
+                path: UNICODE_PATH.to_string(),
+            };
             let composition_exclusion_format =
                 CompositionExclusionFormat::UnicodeCharacterDatabase {
-                    path: COMPOSITION_EXCLUSION_PATH,
+                    path: COMPOSITION_EXCLUSION_PATH.to_string(),
                 };
-            let merge_format = MergeFormat::HuggingFace { path: MERGE_PATH };
-            let vocab_format = VocabFormat::HuggingFace { path: VOCAB_PATH };
+            let merge_format = MergeFormat::HuggingFace {
+                path: MERGE_PATH.to_string(),
+            };
+            let vocab_format = VocabFormat::HuggingFace {
+                path: VOCAB_PATH.to_string(),
+            };
 
             Tokenizer::new(
                 &unicode_format,
