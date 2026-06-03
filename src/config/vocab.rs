@@ -1,17 +1,17 @@
 use super::{Format, parse_string_with_escape_sequence, parse_u32};
 use crate::storage::Mmap;
 
-pub enum VocabFormat<'a> {
-    HuggingFace { path: &'a str },
+pub enum VocabFormat {
+    HuggingFace { path: String },
 }
 
-impl Format for VocabFormat<'_> {
-    type Output<'a> = Result<(String, u32), crate::Error>;
-    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+impl Format for VocabFormat {
+    type Output = Result<(String, u32), crate::Error>;
+    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
-        match self {
-            &VocabFormat::HuggingFace { path } => {
+        match &self {
+            VocabFormat::HuggingFace { path } => {
                 let file = Mmap::new(path)?;
                 Ok((file, parse_huggingface))
             }

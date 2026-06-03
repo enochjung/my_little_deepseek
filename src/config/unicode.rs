@@ -1,8 +1,8 @@
 use super::{Format, parse_hex_u32, parse_u8};
 use crate::storage::Mmap;
 
-pub enum UnicodeFormat<'a> {
-    UnicodeCharacterDatabase { path: &'a str },
+pub enum UnicodeFormat {
+    UnicodeCharacterDatabase { path: String },
 }
 
 pub(crate) struct UCDLine {
@@ -11,13 +11,13 @@ pub(crate) struct UCDLine {
     pub(crate) decomposition: Vec<u32>,
 }
 
-impl Format for UnicodeFormat<'_> {
-    type Output<'a> = Result<UCDLine, crate::Error>;
-    type Parser = for<'a> fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+impl Format for UnicodeFormat {
+    type Output = Result<UCDLine, crate::Error>;
+    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
-        match self {
-            &UnicodeFormat::UnicodeCharacterDatabase { path } => {
+        match &self {
+            UnicodeFormat::UnicodeCharacterDatabase { path } => {
                 let file = Mmap::new(path)?;
                 Ok((file, parse_ucd))
             }

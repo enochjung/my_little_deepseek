@@ -1,10 +1,10 @@
-pub const _END_OF_SENTENCE: u32 = 151643; // <｜end▁of▁sentence｜>
+pub const END_OF_SENTENCE: u32 = 151643; // <｜end▁of▁sentence｜>
 pub const USER: u32 = 151644; // <｜User｜>
 pub const ASSISTANT: u32 = 151645; // <｜Assistant｜>
 pub const BEGIN_OF_SENTENCE: u32 = 151646; // <｜begin▁of▁sentence｜>
 pub const _EOT: u32 = 151647; // <|EOT|>
 pub const THINK_START: u32 = 151648; // <think>
-pub const _THINK_END: u32 = 151649; // </think>
+pub const THINK_END: u32 = 151649; // </think>
 pub const _QUAD_START: u32 = 151650; // <|quad_start|>
 pub const _QUAD_END: u32 = 151651; // <|quad_end|>
 pub const _VISION_START: u32 = 151652; // <|vision_start|>

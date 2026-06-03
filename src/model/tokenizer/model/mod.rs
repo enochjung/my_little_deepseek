@@ -49,8 +49,12 @@ mod tests {
     const VOCAB_PATH: &'static str = "model/vocab.json";
 
     fn assert(input: &[Vec<String>], expected: &[u32]) {
-        let merge_format = MergeFormat::HuggingFace { path: MERGE_PATH };
-        let vocab_format = VocabFormat::HuggingFace { path: VOCAB_PATH };
+        let merge_format = MergeFormat::HuggingFace {
+            path: MERGE_PATH.to_string(),
+        };
+        let vocab_format = VocabFormat::HuggingFace {
+            path: VOCAB_PATH.to_string(),
+        };
         let model_engine = ModelEngine::new(&merge_format, &vocab_format)
             .expect("initializing model should succeed");
         let actual = model_engine.encode(input).expect("encoding should succeed");

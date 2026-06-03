@@ -11,19 +11,19 @@ pub use unicode::UnicodeFormat;
 pub use vocab::VocabFormat;
 pub use weight::WeightFormat;
 
-pub struct Configure<'a> {
-    pub(crate) unicode_format: Option<UnicodeFormat<'a>>,
-    pub(crate) composition_exclusion_format: Option<CompositionExclusionFormat<'a>>,
-    pub(crate) merge_format: Option<MergeFormat<'a>>,
-    pub(crate) vocab_format: Option<VocabFormat<'a>>,
-    pub(crate) weight_format: Option<WeightFormat<'a>>,
+pub struct Configure {
+    pub(crate) unicode_format: Option<UnicodeFormat>,
+    pub(crate) composition_exclusion_format: Option<CompositionExclusionFormat>,
+    pub(crate) merge_format: Option<MergeFormat>,
+    pub(crate) vocab_format: Option<VocabFormat>,
+    pub(crate) weight_format: Option<WeightFormat>,
     pub(crate) num_hidden_layers: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
 }
 
-impl<'a> Configure<'a> {
+impl Configure {
     pub fn new() -> Self {
         Self {
             unicode_format: None,
@@ -38,27 +38,27 @@ impl<'a> Configure<'a> {
         }
     }
 
-    pub fn unicode_format(mut self, value: UnicodeFormat<'a>) -> Self {
+    pub fn unicode_format(mut self, value: UnicodeFormat) -> Self {
         self.unicode_format = Some(value);
         self
     }
 
-    pub fn composition_exclusion_format(mut self, value: CompositionExclusionFormat<'a>) -> Self {
+    pub fn composition_exclusion_format(mut self, value: CompositionExclusionFormat) -> Self {
         self.composition_exclusion_format = Some(value);
         self
     }
 
-    pub fn merge_format(mut self, value: MergeFormat<'a>) -> Self {
+    pub fn merge_format(mut self, value: MergeFormat) -> Self {
         self.merge_format = Some(value);
         self
     }
 
-    pub fn vocab_format(mut self, value: VocabFormat<'a>) -> Self {
+    pub fn vocab_format(mut self, value: VocabFormat) -> Self {
         self.vocab_format = Some(value);
         self
     }
 
-    pub fn weight_format(mut self, value: WeightFormat<'a>) -> Self {
+    pub fn weight_format(mut self, value: WeightFormat) -> Self {
         self.weight_format = Some(value);
         self
     }
@@ -85,8 +85,8 @@ impl<'a> Configure<'a> {
 }
 
 pub(crate) trait Format {
-    type Output<'a>;
-    type Parser: for<'a> Fn(&'a Mmap) -> Box<dyn Iterator<Item = Self::Output<'a>> + 'a>;
+    type Output;
+    type Parser: Fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error>;
 }

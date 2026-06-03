@@ -1,4 +1,4 @@
-use crate::kernel::x86_64;
+use crate::kernel;
 use crate::storage::{Mmap, MmapMut, Storage};
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -280,7 +280,7 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         let mut dst = unsafe { self.data.as_mut_ptr().byte_add(dst_offset) };
         let mut src = unsafe { other.data.as_ptr().byte_add(other.layout.offset) };
         for _ in 0..n_lines {
-            unsafe { x86_64::copy(dst, src, len) };
+            unsafe { kernel::copy(dst, src, len) };
             dst = unsafe { dst.byte_add(dst_stride) };
             src = unsafe { src.byte_add(src_stride) };
         }
@@ -306,14 +306,14 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         let is_src_packed = other.layout.stride == other.layout.line_elems();
         if is_src_packed {
             let n = self.layout.nrow as usize * self.layout.ncol as usize;
-            unsafe { x86_64::cast_bf16_to_f32_n_n(dst, src, n) };
+            unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, n) };
         } else {
             let mut dst = dst;
             let mut src = src;
             let n_lines = self.layout.n_lines();
             let line_elems = self.layout.line_elems();
             for _ in 0..n_lines {
-                unsafe { x86_64::cast_bf16_to_f32_n_n(dst, src, line_elems as usize) };
+                unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, line_elems as usize) };
                 dst = unsafe { dst.add(line_elems as usize) };
                 src = unsafe { src.byte_add(other.layout.stride as usize * BF16::BYTES) };
             }
@@ -321,70 +321,78 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         Ok(())
     }
 
-    /*
-
-    pub(crate) fn residual<T: TensorTrait<F32, Host> + ?Sized>(
+    pub(crate) fn add<'b, O>(
         &mut self,
-        _other: &T,
-    ) -> Result<(), crate::Error> {
-        todo!()
-        let is_row_major = self.layout().is_row_major;
-        let nrow = self.layout().nrow;
-        let ncol = self.layout().ncol;
-        let stride = self.layout().stride;
-        let n_lines = self.layout().n_lines();
-        let line_bytes = self.layout().line_bytes();
-        let is_packed = self.layout().is_packed();
-        let other_layout = other.layout();
-
-        if is_row_major != other_layout.is_row_major {
+        other: &Tensor<'b, O, F32, Host>,
+    ) -> Result<(), crate::Error>
+    where
+        O: Ownership + StorageType<'b, Host>,
+    {
+        if self.layout.is_row_major != other.layout.is_row_major {
             return Err(crate::Error::operation_not_supported(
-                "residual with mismatched tensor layout majority (row-major vs col-major)",
+                "`add` with mismatched tensor layout majority",
             ));
         }
+        validate_shape(
+            other.layout.nrow,
+            other.layout.ncol,
+            self.layout.nrow,
+            self.layout.ncol,
+        )?;
 
-        if nrow != other_layout.nrow {
-            return Err(crate::Error::shape_mismatch(
-                nrow as usize,
-                other_layout.nrow as usize,
-            ));
-        }
-        if ncol != other_layout.ncol {
-            return Err(crate::Error::shape_mismatch(
-                ncol as usize,
-                other_layout.ncol as usize,
-            ));
-        }
+        let is_other_packed = other.layout.line_elems() == other.layout.stride;
+        let y = self.data.as_mut_ptr() as *mut f32;
+        let x = unsafe { other.data.as_ptr().byte_add(other.layout.offset) } as *const f32;
 
-        let n = nrow as usize * ncol as usize;
-        if n == 0 {
-            return Ok(());
-        }
+        if is_other_packed {
+            let n = self.layout.nrow as usize * self.layout.ncol as usize;
+            unsafe { kernel::add_n_n(y as *mut f32, x as *const f32, n) };
+        } else {
+            let mut y = y;
+            let mut x = x;
 
-        let dst_stride_bytes = stride as usize * F32::BYTES;
-        let src_stride_bytes = other_layout.stride as usize * F32::BYTES;
+            let n_lines = self.layout.n_lines();
+            let line_elems = self.layout.line_elems() as usize;
 
-        unsafe {
-            let y = self.as_mut_ptr(0, 0)?;
-            let x = other.as_ptr(0, 0);
-
-            if is_packed && other_layout.is_packed() {
-                x86_64::add_n_n(y as *mut f32, x as *const f32, n);
-            } else {
-                let mut y = y;
-                let mut x = x;
-
-                for _ in 0..n_lines {
-                    x86_64::add_n_n(y as *mut f32, x as *const f32, line_bytes);
-                    y = y.add(dst_stride_bytes);
-                    x = x.add(src_stride_bytes);
-                }
+            for _ in 0..n_lines {
+                unsafe { kernel::add_n_n(y, x, line_elems) };
+                y = unsafe { y.add(self.layout.stride as usize) };
+                x = unsafe { x.add(other.layout.stride as usize) };
             }
         }
 
         Ok(())
     }
 
+    pub fn rms_norm<'b, O>(
+        &mut self,
+        weight: &Tensor<'b, O, F32, Host>,
+        epsilon: f32,
+    ) -> Result<(), crate::Error>
+    where
+        O: Ownership + StorageType<'b, Host>,
+    {
+        if self.layout.is_row_major != true {
+            return Err(crate::Error::operation_not_supported(
+                "`rms_norm` with column-major",
+            ));
+        }
+        validate_shape(weight.layout.nrow, weight.layout.ncol, 1, self.layout.ncol)?;
+
+        let n_lines = self.layout.n_lines();
+        let line_elems = self.layout.line_elems();
+        let mut y = self.data.as_mut_ptr() as *mut f32;
+        let x = unsafe { weight.data.as_ptr().byte_add(weight.layout.offset) } as *const f32;
+        for _ in 0..n_lines {
+            let rms = unsafe { kernel::rms_n(y as *const f32, line_elems as usize) };
+            let scale = 1.0 / (rms + epsilon);
+            unsafe { kernel::mul_n_n(y, x, scale, line_elems as usize) };
+            y = unsafe { y.add(self.layout.stride as usize) };
+        }
+        Ok(())
+    }
+
+    /*
     pub(crate) fn silu(&mut self) -> Result<(), crate::Error> {
         todo!()
         let stride = self.layout().stride;
@@ -413,36 +421,8 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
     }
      */
 
-    pub fn rms_norm<'b, O>(
-        &mut self,
-        weight: &Tensor<'b, O, F32, Host>,
-        epsilon: f32,
-    ) -> Result<(), crate::Error>
-    where
-        O: Ownership + StorageType<'b, Host>,
-    {
-        if self.layout.is_row_major != true {
-            return Err(crate::Error::operation_not_supported(
-                "rms-norm with column-major",
-            ));
-        }
-        validate_shape(weight.layout.nrow, weight.layout.ncol, 1, self.layout.ncol)?;
-
-        let n_lines = self.layout.n_lines();
-        let line_elems = self.layout.line_elems();
-        let mut y = self.data.as_mut_ptr() as *mut f32;
-        let x = unsafe { weight.data.as_ptr().byte_add(weight.layout.offset) } as *const f32;
-        for _ in 0..n_lines {
-            let rms = unsafe { x86_64::rms_n(y as *const f32, line_elems as usize) };
-            let scale = 1.0 / (rms + epsilon);
-            unsafe { x86_64::mul_n_n(y, x, scale, line_elems as usize) };
-            y = unsafe { y.add(self.layout.stride as usize) };
-        }
-        Ok(())
-    }
-
     /*
-    pub(crate) fn muladd_weight_bias<T: TensorTrait<F32, Host> + ?Sized>(
+    pub(crate) fn muladd<T: TensorTrait<F32, Host> + ?Sized>(
         &mut self,
         _weight: &T,
         _bias: &T,

@@ -4,6 +4,7 @@ mod rms_normalizer;
 mod tokenizer;
 
 use crate::config::{Configure, Format};
+use crate::session::{KVCache, Session};
 use crate::storage::*;
 use crate::tensor::*;
 use attention::Attention;
@@ -13,19 +14,19 @@ use std::collections::HashMap;
 use std::ops::Range;
 use tokenizer::Tokenizer;
 
-pub struct Model<'a> {
+pub struct Model {
     pub(crate) num_hidden_layers: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
 
     tokenizer: Tokenizer,
-    embedding: Embedding<'a, F32, Host>,
-    attentions: Vec<Attention<'a, F32, Host>>,
+    embedding: Embedding<F32, Host>,
+    attentions: Vec<Attention<F32, Host>>,
 }
 
-impl<'a> Model<'a> {
-    pub fn new<'b>(configure: Configure<'b>) -> Result<Self, crate::Error> {
+impl Model {
+    pub fn new(configure: Configure) -> Result<Self, crate::Error> {
         let num_hidden_layers = configure.num_hidden_layers;
         let rms_norm_epsilon = configure.rms_norm_epsilon;
         let hidden_size = configure.hidden_size;
@@ -82,14 +83,52 @@ impl<'a> Model<'a> {
         })
     }
 
+    pub fn new_session(&self) -> Session<'_> {
+        Session::new(self)
+    }
+
     pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
         self.tokenizer.tokenize(input)
     }
 
-    pub(crate) fn build_embedding_vectors<'b>(
-        &'a self,
+    pub(crate) fn prefill(
+        &self,
+        tokens: &[u32],
+        kv_cache: &mut KVCache,
+    ) -> Result<u32, crate::Error> {
+        // TODO: impl real prefill
+
+        let mut next_token = 0;
+        for &token in tokens {
+            next_token = self.decode(token, kv_cache)?;
+        }
+        Ok(next_token)
+    }
+
+    pub(crate) fn decode(&self, token: u32, kv_cache: &mut KVCache) -> Result<u32, crate::Error> {
+        let tmp_storage = MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?;
+        let mut residual = Tensor::<Mut, F32, Host>::new(tmp_storage, 1, self.hidden_size, true)?;
+
+        let mut x = self.build_embedding_tensor(&[token])?;
+
+        for layer in 0..self.num_hidden_layers {
+            residual.copy(0, 0, &x)?;
+            self.run_attention_block(&mut x, kv_cache, layer)?;
+            x.add(&residual)?;
+
+            residual.copy(0, 0, &x)?;
+            self.run_mlp_block(&mut x, layer)?;
+            x.add(&residual)?;
+        }
+
+        let next_token = self.run_output_block(x)?;
+        Ok(next_token)
+    }
+
+    fn build_embedding_tensor(
+        &self,
         token_ids: &[u32],
-    ) -> Result<Tensor<'b, Mut, F32, Host>, crate::Error> {
+    ) -> Result<Tensor<'static, Mut, F32, Host>, crate::Error> {
         let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
         let storage = MmapMut::new(size)?;
         let mut tensor =
@@ -104,62 +143,60 @@ impl<'a> Model<'a> {
         Ok(tensor)
     }
 
-    pub(crate) fn apply_attention(
+    fn run_attention_block(
         &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-        _tmp: &mut Host,
-        _layer_idx: usize,
+        x: &mut Tensor<Mut, F32, Host>,
+        kv_cache: &mut KVCache,
+        layer: usize,
+    ) -> Result<(), crate::Error> {
+        self.attentions[layer].run_attention(x, kv_cache, self.rms_norm_epsilon)
+    }
+
+    fn run_mlp_block(
+        &self,
+        x: &mut Tensor<Mut, F32, Host>,
+        layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
         /*
-        let cloned = TensorMut::copy(tmp, 0, target)?;
 
-        self.attentions[layer_idx].apply_attention(target, self.rms_norm_epsilon)?;
-        target.residual(&cloned)?;
+           // ⑨ Post-Attention RMS Norm
+           // [Shape] norm_x_mlp: [1, 1536]
+           let norm_x_mlp = rms_norm(&x, &weights.layers[layer].post_attention_layernorm);
 
-        Ok(())
+           // ⑩ Gate & Up Projection (Qwen2는 SwiGLU를 사용)
+           // [Shape] gate_proj: [1, 8960]
+           // [Shape] up_proj: [1, 8960]
+           let gate_proj = matmul(&norm_x_mlp, &weights.layers[layer].gate_proj);
+           let up_proj = matmul(&norm_x_mlp, &weights.layers[layer].up_proj);
+
+           // ⑪ SiLU 활성화 함수 및 요소별 곱셈(Element-wise)
+           // [Shape] activated: [1, 8960]
+           let activated = elementwise_mul(&silu(&gate_proj), &up_proj);
+           //// SiLU : x / (1 + e^(-x)) (element op)
+
+           // ⑫ Down Projection
+           // [Shape] mlp_out: [1, 1536]
+           let mlp_out = matmul(&activated, &weights.layers[layer].down_proj);
         */
     }
 
-    pub(crate) fn apply_feedforward(
-        &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-        _layer_idx: usize,
-    ) -> Result<(), crate::Error> {
+    fn run_output_block(&self, x: Tensor<Mut, F32, Host>) -> Result<u32, crate::Error> {
         todo!()
-
         /*
-        // FeedForward(X: N*1536) -> N*1536
-        {
-            // post rms norm
-            //// (model.layers.#.post_attention_layernorm.weight)
+        // [Shape] final_x: [1, 1536]
+        let final_x = rms_norm(&x, &weights.norm);
 
-            // input (N*1536)
+        // 4. LM Head (Vocabulary Projection)
+        // tie_word_embeddings이 false이므로 독립적인 가중치 사용
+        // [Shape] logits: [1, 151936]
+        let logits = matmul(&final_x, &weights.lm_head);
 
-            // gate : Wgate x input (N*8960)
-            //// (model.layers.#.mlp.gate_proj.weight)
-            // up   : Wup   x input (N*8960)
-            //// (model.layers.#.mlp.up_proj.weight)
+        // 5. Sampling
+        // logits에서 가장 확률이 높은 토큰(Argmax) 또는 샘플링을 통해 다음 토큰 결정
+        let next_token = argmax(&logits);
 
-            // gate_silu : SiLU(gate)
-            //// SiLU : x / (1 + e^(-x)) (element op)
-
-            // up_proj : up * gate_silu (element-wise) (N*8960)
-
-            // down_proj : Wdown x up_proj (N*1536)
-            //// (model.layers.#.mlp.down_proj.weight)
-        }
-
-        // residual (addition)
-        // res := X + FeedForward(X)
-        */
-    }
-
-    pub(crate) fn apply_lm_head(
-        &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-    ) -> Result<(), crate::Error> {
-        todo!()
+         */
 
         // rms norm (model.norm.weight)
         // lm head (lm_head.weight)
@@ -334,15 +371,23 @@ mod tests {
     const VOCAB_PATH: &'static str = "model/vocab.json";
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
 
-    fn get_model<'a>() -> Model<'a> {
+    fn get_model() -> Model {
         let conf = Configure::new()
-            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase { path: UNICODE_PATH })
-            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
-                path: COMPOSITION_EXCLUSION_PATH,
+            .unicode_format(UnicodeFormat::UnicodeCharacterDatabase {
+                path: UNICODE_PATH.to_string(),
             })
-            .merge_format(MergeFormat::HuggingFace { path: MERGE_PATH })
-            .vocab_format(VocabFormat::HuggingFace { path: VOCAB_PATH })
-            .weight_format(WeightFormat::Safetensor { path: WEIGHT_PATH });
+            .composition_exclusion_format(CompositionExclusionFormat::UnicodeCharacterDatabase {
+                path: COMPOSITION_EXCLUSION_PATH.to_string(),
+            })
+            .merge_format(MergeFormat::HuggingFace {
+                path: MERGE_PATH.to_string(),
+            })
+            .vocab_format(VocabFormat::HuggingFace {
+                path: VOCAB_PATH.to_string(),
+            })
+            .weight_format(WeightFormat::Safetensor {
+                path: WEIGHT_PATH.to_string(),
+            });
 
         Model::new(conf).expect("initializing model should succeed")
     }
@@ -402,7 +447,7 @@ mod tests {
         let model = get_model();
 
         let embed_tensor = model
-            .build_embedding_vectors(&token_ids)
+            .build_embedding_tensor(&token_ids)
             .expect("appending embedding vectors should succeed");
 
         let nrow = token_ids.len() as u32;
