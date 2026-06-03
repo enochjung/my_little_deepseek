@@ -51,7 +51,7 @@ pub(crate) unsafe fn rms_n(x: *const f32, n: usize) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { rms_n_avx512(x, n) };
+            return unsafe { x86_64::rms_n_avx512(x, n) };
         }
     }
 
@@ -78,7 +78,7 @@ pub(crate) unsafe fn mul_n_n(y: *mut f32, x: *const f32, alpha: f32, n: usize) -
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { mul_n_n_avx512(y, x, alpha, n) };
+            return unsafe { x86_64::mul_n_n_avx512(y, x, alpha, n) };
         }
     }
 
@@ -106,7 +106,7 @@ pub(crate) unsafe fn add_n_n(y: *mut f32, x: *const f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { add_n_n_avx512(y, x, n) };
+            return unsafe { x86_64::add_n_n_avx512(y, x, n) };
         }
     }
 
@@ -131,7 +131,7 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { silu_n_avx512(x, n) };
+            return unsafe { x86_64::silu_n_avx512(x, n) };
         }
     }
 
@@ -182,7 +182,7 @@ pub(crate) unsafe fn muladd_1n_nn_1n(
             #[cfg(target_arch = "x86_64")]
             {
                 if is_x86_feature_detected!("avx512f") {
-                    return unsafe { muladd_r1n_rnn_1n_avx512(c, a, lda, b, buf, n) };
+                    return unsafe { x86_64::muladd_r1n_rnn_1n_avx512(c, a, lda, b, buf, n) };
                 }
             }
 
@@ -283,7 +283,7 @@ pub(crate) unsafe fn muladd_mn_nn_1n(
             {
                 if is_x86_feature_detected!("avx512f") {
                     while c_row != c_row_end {
-                        unsafe { muladd_r1n_rnn_1n_avx512(c_row, a, lda, b, buf, n) };
+                        unsafe { x86_64::muladd_r1n_rnn_1n_avx512(c_row, a, lda, b, buf, n) };
                         c_row = unsafe { c_row.add(ldc) };
                     }
                     return;
