@@ -15,14 +15,11 @@ impl RMSNormalizer<F32, Host> {
         Ok(Self { norm_weight })
     }
 
-    pub(crate) fn apply_rms_norm<'a>(
+    pub(crate) fn run_rms_norm(
         &self,
-        target: &mut Tensor<'a, Mut, F32, Host>,
+        x: &mut Tensor<Mut, F32, Host>,
         rms_norm_epsilon: f32,
-    ) -> Result<(), crate::Error>
-    where
-        Mut: StorageType<'a, Host>,
-    {
-        target.rms_norm(&self.norm_weight, rms_norm_epsilon)
+    ) -> Result<(), crate::Error> {
+        x.rms_norm(&self.norm_weight, rms_norm_epsilon)
     }
 }

@@ -56,19 +56,22 @@ fn main() {
         std::io::stdout().flush().unwrap();
         println!();
 
-        let mut decoding_session = session.send_prompt(input);
-        decoding_session.start();
+        let mut session_task = session
+            .send_prompt(input)
+            .expect("generating session-task should succeed");
 
         println!("[Assistant]: ");
 
         loop {
-            if let Some(output) = decoding_session.get_next_string() {
+            if let Some(output) = session_task.get_next_string() {
                 print!("{output}");
                 std::io::stdout().flush().unwrap();
             }
 
-            if decoding_session.is_done() {
-                session = decoding_session.finish_decoding();
+            if session_task.is_finished() {
+                session = session_task
+                    .finish_decoding()
+                    .expect("decoding should succeed");
                 break;
             }
 

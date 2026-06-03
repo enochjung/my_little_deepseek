@@ -4,7 +4,7 @@ mod rms_normalizer;
 mod tokenizer;
 
 use crate::config::{Configure, Format};
-use crate::session::{Ready, Session};
+use crate::session::{KVCache, Session};
 use crate::storage::*;
 use crate::tensor::*;
 use attention::Attention;
@@ -83,15 +83,49 @@ impl Model {
         })
     }
 
-    pub fn new_session(&self) -> Session<'_, Ready> {
-        Session::<Ready>::new(self)
+    pub fn new_session(&self) -> Session<'_> {
+        Session::new(self)
     }
 
     pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
         self.tokenizer.tokenize(input)
     }
 
-    pub(crate) fn build_embedding_vectors(
+    pub(crate) fn prefill(
+        &self,
+        tokens: &[u32],
+        kv_cache: &mut KVCache,
+    ) -> Result<u32, crate::Error> {
+        // TODO: impl real prefill
+
+        let mut next_token = 0;
+        for &token in tokens {
+            next_token = self.decode(token, kv_cache)?;
+        }
+        Ok(next_token)
+    }
+
+    pub(crate) fn decode(&self, token: u32, kv_cache: &mut KVCache) -> Result<u32, crate::Error> {
+        let tmp_storage = MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?;
+        let mut residual = Tensor::<Mut, F32, Host>::new(tmp_storage, 1, self.hidden_size, true)?;
+
+        let mut x = self.build_embedding_tensor(&[token])?;
+
+        for layer in 0..self.num_hidden_layers {
+            residual.copy(0, 0, &x)?;
+            self.run_attention_block(&mut x, kv_cache, layer)?;
+            x.add(&residual)?;
+
+            residual.copy(0, 0, &x)?;
+            self.run_mlp_block(&mut x, layer)?;
+            x.add(&residual)?;
+        }
+
+        let next_token = self.run_output_block(x)?;
+        Ok(next_token)
+    }
+
+    fn build_embedding_tensor(
         &self,
         token_ids: &[u32],
     ) -> Result<Tensor<'static, Mut, F32, Host>, crate::Error> {
@@ -109,190 +143,47 @@ impl Model {
         Ok(tensor)
     }
 
-    pub(crate) fn apply_attention(
+    fn run_attention_block(
         &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-        _tmp: &mut Host,
-        _layer_idx: usize,
+        x: &mut Tensor<Mut, F32, Host>,
+        kv_cache: &mut KVCache,
+        layer: usize,
+    ) -> Result<(), crate::Error> {
+        self.attentions[layer].run_attention(x, kv_cache, self.rms_norm_epsilon)
+    }
+
+    fn run_mlp_block(
+        &self,
+        x: &mut Tensor<Mut, F32, Host>,
+        layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
         /*
-        let cloned = TensorMut::copy(tmp, 0, target)?;
 
-        self.attentions[layer_idx].apply_attention(target, self.rms_norm_epsilon)?;
-        target.residual(&cloned)?;
+           // ⑨ Post-Attention RMS Norm
+           // [Shape] norm_x_mlp: [1, 1536]
+           let norm_x_mlp = rms_norm(&x, &weights.layers[layer].post_attention_layernorm);
 
-        Ok(())
+           // ⑩ Gate & Up Projection (Qwen2는 SwiGLU를 사용)
+           // [Shape] gate_proj: [1, 8960]
+           // [Shape] up_proj: [1, 8960]
+           let gate_proj = matmul(&norm_x_mlp, &weights.layers[layer].gate_proj);
+           let up_proj = matmul(&norm_x_mlp, &weights.layers[layer].up_proj);
+
+           // ⑪ SiLU 활성화 함수 및 요소별 곱셈(Element-wise)
+           // [Shape] activated: [1, 8960]
+           let activated = elementwise_mul(&silu(&gate_proj), &up_proj);
+           //// SiLU : x / (1 + e^(-x)) (element op)
+
+           // ⑫ Down Projection
+           // [Shape] mlp_out: [1, 1536]
+           let mlp_out = matmul(&activated, &weights.layers[layer].down_proj);
         */
     }
 
-    pub(crate) fn apply_feedforward(
-        &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-        _layer_idx: usize,
-    ) -> Result<(), crate::Error> {
+    fn run_output_block(&self, x: Tensor<Mut, F32, Host>) -> Result<u32, crate::Error> {
         todo!()
-
         /*
-        // FeedForward(X: N*1536) -> N*1536
-        {
-            // post rms norm
-            //// (model.layers.#.post_attention_layernorm.weight)
-
-            // input (N*1536)
-
-            // gate : Wgate x input (N*8960)
-            //// (model.layers.#.mlp.gate_proj.weight)
-            // up   : Wup   x input (N*8960)
-            //// (model.layers.#.mlp.up_proj.weight)
-
-            // gate_silu : SiLU(gate)
-            //// SiLU : x / (1 + e^(-x)) (element op)
-
-            // up_proj : up * gate_silu (element-wise) (N*8960)
-
-            // down_proj : Wdown x up_proj (N*1536)
-            //// (model.layers.#.mlp.down_proj.weight)
-        }
-
-        // residual (addition)
-        // res := X + FeedForward(X)
-        */
-    }
-
-    pub(crate) fn apply_lm_head(
-        &self,
-        _target: &mut Tensor<Mut, F32, Host>,
-    ) -> Result<(), crate::Error> {
-        todo!()
-
-        // rms norm (model.norm.weight)
-        // lm head (lm_head.weight)
-        // append embedding if not finished
-    }
-
-    /*
-    fn decode_one_step(&mut self, input_token: u32) -> u32 {
-        // 1. Token Embedding
-        // [Shape] input_x: [1, 1536]
-        let mut x: Vector<HIDDEN_SIZE> = weights.embed_tokens[input_token];
-
-        // 2. Transformer Layers 순회 (총 28개 층)
-        for layer in 0..NUM_LAYERS {
-            let residual = x.clone(); // Residual Connection을 위한 저장
-
-            // ========================================================
-            // [Attention Block]
-            // ========================================================
-
-            // ① Pre-RMS Norm
-            // [Shape] norm_x: [1, 1536]
-            let norm_x = rms_norm(&x, &weights.layers[layer].input_layernorm);
-
-            // ② Q, K, V Projection
-            // [Shape] q_proj: [1, 1536] (12 heads * 128)
-            // [Shape] k_proj: [1, 256]  (2 heads * 128)
-            // [Shape] v_proj: [1, 256]  (2 heads * 128)
-            let q_proj = matmul(&norm_x, &weights.layers[layer].q_proj);
-            let k_proj = matmul(&norm_x, &weights.layers[layer].k_proj);
-            let v_proj = matmul(&norm_x, &weights.layers[layer].v_proj);
-
-            // ③ 헤드별로 분할 (Reshape)
-            // [Shape] q: [12, 1, 128]
-            // [Shape] k: [2, 1, 128]
-            // [Shape] v: [2, 1, 128]
-            let mut q = reshape_to_heads::<NUM_Q_HEADS>(&q_proj);
-            let mut k = reshape_to_heads::<NUM_KV_HEADS>(&k_proj);
-            let v = reshape_to_heads::<NUM_KV_HEADS>(&v_proj);
-
-            // ④ RoPE (Rotary Position Embedding) 적용
-            // 주의: RoPE는 Q와 K에만 적용되며, V에는 적용되지 않습니다!
-            // 현재 위치 `current_pos`(N)에 해당하는 회전 변환만 수행합니다.
-            // [Shape] q, k 크기 변동 없음
-            apply_rope_in_place(&mut q, current_pos);
-            apply_rope_in_place(&mut k, current_pos);
-
-            // ⑤ KV Cache 업데이트 및 가져오기 (가장 헷갈려하시는 부분)
-            // 현재 스텝의 K, V를 캐시에 '추가(Append)' 합니다.
-            kv_cache[layer].k_cache.append(k); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
-            kv_cache[layer].v_cache.append(v); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
-
-            // 캐시에서 과거부터 현재까지의 전체 K, V를 가져옵니다.
-            // [Shape] K_past: [2, N+1, 128]
-            // [Shape] V_past: [2, N+1, 128]
-            let k_past = &kv_cache[layer].k_cache;
-            let v_past = &kv_cache[layer].v_cache;
-
-            // ⑥ GQA (Grouped Query Attention) 연산
-            // Qwen2는 Q 헤드 12개, KV 헤드 2개이므로, Q 헤드 6개당 1개의 KV 헤드를 공유합니다.
-            // [Shape] attn_output_heads: [12, 1, 128]
-            let mut attn_output_heads = Tensor3D::<NUM_Q_HEADS, 1, HEAD_DIM>::zeros();
-
-            for q_idx in 0..NUM_Q_HEADS {
-                let kv_idx = q_idx / 6; // 0~5는 kv_idx 0, 6~11은 kv_idx 1 사용
-
-                // Q * K^T
-                // q[q_idx] 크기: [1, 128]
-                // k_past[kv_idx]^T 크기: [128, N+1]
-                // [Shape] scores: [1, N+1]
-                let mut scores = matmul(&q[q_idx], transpose(&k_past[kv_idx]));
-                scores = scale(&scores, 1.0 / sqrt(128.0));
-
-                // Softmax
-                // [Shape] probs: [1, N+1]
-                let probs = softmax(&scores);
-
-                // Probs * V
-                // probs 크기: [1, N+1]
-                // v_past[kv_idx] 크기: [N+1, 128]
-                // [Shape] head_out: [1, 128]
-                attn_output_heads[q_idx] = matmul(&probs, &v_past[kv_idx]);
-            }
-
-            // ⑦ Attention 출력 병합 및 O_proj
-            // [Shape] attn_concat: [1, 1536] (12 * 128)
-            let attn_concat = flatten_heads(&attn_output_heads);
-
-            // [Shape] attn_out: [1, 1536]
-            let attn_out = matmul(&attn_concat, &weights.layers[layer].o_proj);
-
-            // ⑧ 첫 번째 Residual Connection
-            // [Shape] x: [1, 1536]
-            x = add(&residual, &attn_out);
-
-            // ========================================================
-            // [MLP Block (SwiGLU)]
-            // ========================================================
-            let residual_mlp = x.clone();
-
-            // ⑨ Post-Attention RMS Norm
-            // [Shape] norm_x_mlp: [1, 1536]
-            let norm_x_mlp = rms_norm(&x, &weights.layers[layer].post_attention_layernorm);
-
-            // ⑩ Gate & Up Projection (Qwen2는 SwiGLU를 사용)
-            // [Shape] gate_proj: [1, 8960]
-            // [Shape] up_proj: [1, 8960]
-            let gate_proj = matmul(&norm_x_mlp, &weights.layers[layer].gate_proj);
-            let up_proj = matmul(&norm_x_mlp, &weights.layers[layer].up_proj);
-
-            // ⑪ SiLU 활성화 함수 및 요소별 곱셈(Element-wise)
-            // [Shape] activated: [1, 8960]
-            let activated = elementwise_mul(&silu(&gate_proj), &up_proj);
-
-            // ⑫ Down Projection
-            // [Shape] mlp_out: [1, 1536]
-            let mlp_out = matmul(&activated, &weights.layers[layer].down_proj);
-
-            // ⑬ 두 번째 Residual Connection
-            // [Shape] x: [1, 1536]
-            x = add(&residual_mlp, &mlp_out);
-        } // layer 루프 종료
-
-        // ========================================================
-        // [Final Output Block]
-        // ========================================================
-
-        // 3. Final RMS Norm
         // [Shape] final_x: [1, 1536]
         let final_x = rms_norm(&x, &weights.norm);
 
@@ -305,9 +196,12 @@ impl Model {
         // logits에서 가장 확률이 높은 토큰(Argmax) 또는 샘플링을 통해 다음 토큰 결정
         let next_token = argmax(&logits);
 
-        next_token
+         */
+
+        // rms norm (model.norm.weight)
+        // lm head (lm_head.weight)
+        // append embedding if not finished
     }
-    */
 }
 
 fn build_tensor_f32<'a>(
@@ -553,7 +447,7 @@ mod tests {
         let model = get_model();
 
         let embed_tensor = model
-            .build_embedding_vectors(&token_ids)
+            .build_embedding_tensor(&token_ids)
             .expect("appending embedding vectors should succeed");
 
         let nrow = token_ids.len() as u32;

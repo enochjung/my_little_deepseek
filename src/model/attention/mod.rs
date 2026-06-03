@@ -1,5 +1,6 @@
 use super::AttentionLayerWeightInfo;
 use super::{RMSNormalizer, build_tensor_f32};
+use crate::session::KVCache;
 use crate::storage::*;
 use crate::tensor::*;
 
@@ -47,43 +48,86 @@ impl Attention<F32, Host> {
         })
     }
 
-    pub(crate) fn apply_attention<'a>(
+    pub(crate) fn run_attention(
         &self,
-        target: &mut Tensor<'a, Mut, F32, Host>,
+        x: &mut Tensor<Mut, F32, Host>,
+        kv_cache: &mut KVCache,
         rms_norm_epsilon: f32,
-    ) -> Result<(), crate::Error>
-    where
-        Mut: StorageType<'a, Host>,
-    {
+    ) -> Result<(), crate::Error> {
+        self.rms_normalizer.run_rms_norm(x, rms_norm_epsilon)?;
+
         todo!()
         /*
-        self.rms_normalizer.apply_rms_norm(target)?;
+              // ① Pre-RMS Norm
+              // [Shape] norm_x: [1, 1536]
+              let norm_x = rms_norm(&x, &weights.layers[layer].input_layernorm);
 
-        let q = super::project_rows(target, &self.q_weight, Some(&self.q_bias), "attention_q")?;
-        let k = super::project_rows(target, &self.k_weight, Some(&self.k_bias), "attention_k")?;
-        let v = super::project_rows(target, &self.v_weight, Some(&self.v_bias), "attention_v")?;
+              // ② Q, K, V Projection
+              // [Shape] q_proj: [1, 1536] (12 heads * 128)
+              // [Shape] k_proj: [1, 256]  (2 heads * 128)
+              // [Shape] v_proj: [1, 256]  (2 heads * 128)
+              let q_proj = matmul(&norm_x, &weights.layers[layer].q_proj);
+              let k_proj = matmul(&norm_x, &weights.layers[layer].k_proj);
+              let v_proj = matmul(&norm_x, &weights.layers[layer].v_proj);
 
-        let mut output = super::project_rows(&q, &self.o_weight, None, "attention_output")?;
+              // ③ 헤드별로 분할 (Reshape)
+              // [Shape] q: [12, 1, 128]
+              // [Shape] k: [2, 1, 128]
+              // [Shape] v: [2, 1, 128]
+              let mut q = reshape_to_heads::<NUM_Q_HEADS>(&q_proj);
+              let mut k = reshape_to_heads::<NUM_KV_HEADS>(&k_proj);
+              let v = reshape_to_heads::<NUM_KV_HEADS>(&v_proj);
 
-        let [rows, cols] = output.shape();
-        let output_ptr = output.as_mut_ptr()? as *mut f32;
-        let k_ptr = k.as_ptr() as *const f32;
-        let v_ptr = v.as_ptr() as *const f32;
-        let k_cols = k.shape()[1] as usize;
-        let v_cols = v.shape()[1] as usize;
+              // ④ RoPE (Rotary Position Embedding) 적용
+              // 주의: RoPE는 Q와 K에만 적용되며, V에는 적용되지 않습니다!
+              // 현재 위치 `current_pos`(N)에 해당하는 회전 변환만 수행합니다.
+              // [Shape] q, k 크기 변동 없음
+              apply_rope_in_place(&mut q, current_pos);
+              apply_rope_in_place(&mut k, current_pos);
 
-        for row_idx in 0..rows as usize {
-            let k_mean = row_mean(unsafe { k_ptr.add(row_idx * k_cols) }, k_cols);
-            let v_mean = row_mean(unsafe { v_ptr.add(row_idx * v_cols) }, v_cols);
-            let blend = 0.5 * (k_mean + v_mean);
-            let row_ptr = unsafe { output_ptr.add(row_idx * cols as usize) };
+              // ⑤ KV Cache 업데이트 및 가져오기 (가장 헷갈려하시는 부분)
+              // 현재 스텝의 K, V를 캐시에 '추가(Append)' 합니다.
+              kv_cache[layer].k_cache.append(k); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
+              kv_cache[layer].v_cache.append(v); // 이전 크기 [2, N, 128] -> [2, N+1, 128]
 
-            for col_idx in 0..cols as usize {
-                unsafe { *row_ptr.add(col_idx) += blend };
-            }
-        }
+              // 캐시에서 과거부터 현재까지의 전체 K, V를 가져옵니다.
+              // [Shape] K_past: [2, N+1, 128]
+              // [Shape] V_past: [2, N+1, 128]
+              let k_past = &kv_cache[layer].k_cache;
+              let v_past = &kv_cache[layer].v_cache;
 
-        Ok(output)
+              // ⑥ GQA (Grouped Query Attention) 연산
+              // Qwen2는 Q 헤드 12개, KV 헤드 2개이므로, Q 헤드 6개당 1개의 KV 헤드를 공유합니다.
+              // [Shape] attn_output_heads: [12, 1, 128]
+              let mut attn_output_heads = Tensor3D::<NUM_Q_HEADS, 1, HEAD_DIM>::zeros();
+
+              for q_idx in 0..NUM_Q_HEADS {
+                  let kv_idx = q_idx / 6; // 0~5는 kv_idx 0, 6~11은 kv_idx 1 사용
+
+                  // Q * K^T
+                  // q[q_idx] 크기: [1, 128]
+                  // k_past[kv_idx]^T 크기: [128, N+1]
+                  // [Shape] scores: [1, N+1]
+                  let mut scores = matmul(&q[q_idx], transpose(&k_past[kv_idx]));
+                  scores = scale(&scores, 1.0 / sqrt(128.0));
+
+                  // Softmax
+                  // [Shape] probs: [1, N+1]
+                  let probs = softmax(&scores);
+
+                  // Probs * V
+                  // probs 크기: [1, N+1]
+                  // v_past[kv_idx] 크기: [N+1, 128]
+                  // [Shape] head_out: [1, 128]
+                  attn_output_heads[q_idx] = matmul(&probs, &v_past[kv_idx]);
+              }
+
+              // ⑦ Attention 출력 병합 및 O_proj
+              // [Shape] attn_concat: [1, 1536] (12 * 128)
+              let attn_concat = flatten_heads(&attn_output_heads);
+
+              // [Shape] attn_out: [1, 1536]
+              let attn_out = matmul(&attn_concat, &weights.layers[layer].o_proj);
         */
     }
 }
