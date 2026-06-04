@@ -1,40 +1,21 @@
-use crate::storage::MmapMut;
+use crate::storage::*;
 use crate::tensor::*;
 
 // https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py#L116
 
-pub(crate) struct RoPE<E: ElemType, L: Location>
-where
-    Mut: StorageType<'static, L>,
-{
+pub(crate) struct RoPE<E: ElemType, MO: Mutable + Owned> {
     head_size: u32,
-    tensor_cs: Tensor<'static, Mut, E, L>,
+    tensor_cs: Tensor<E, MO>,
 }
 
-impl RoPE<F32, Host> {
+impl RoPE<F32, MmapMut> {
     pub(crate) fn new(
         data: MmapMut,
         token_index: u32,
         rope_theta: f32,
         head_size: u32,
     ) -> Result<Self, crate::Error> {
-        // build cos & sin vec.
-
-        // build tensor_cs with data.
-        // tensor_cs size : (1 * head_size)
-
-        // cs_tensor[i] = {
-        //     cos(token_index / (rope_theta ^ (2 * i / head_size)))  if i < head_size/2;
-        //     sin(token_index / (rope_theta ^ (2 * (i-head_size/2) / head_size)))  if head_size/2 <= i;
-        // }
-        // tensor::rope_cs makes like that.
-
-        // store tensor_cos and tensor_sin with tensor::slice
-
-        // Create a mutable tensor backed by the provided MmapMut, fill it with
-        // RoPE cos/sin values using the tensor helper, then convert it to an
-        // owned (readonly) tensor for safe storage.
-        let mut tensor_cs = Tensor::<Mut, F32, Host>::new(data, 1, head_size, true)?;
+        let mut tensor_cs = Tensor::<F32, _>::new(data, 0, 1, head_size, head_size, true)?;
         tensor_cs.rope_cs(token_index, rope_theta, head_size)?;
 
         Ok(Self {
@@ -43,11 +24,11 @@ impl RoPE<F32, Host> {
         })
     }
 
-    // tmp: (1 * head_dim/2)
+    // tmp: (1 * head_dim)
     pub(crate) fn run_rope(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
-        tmp: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<F32, MmapMut>,
+        tmp: &mut Tensor<F32, MmapMut>,
     ) -> Result<(), crate::Error> {
         let n = self.head_size;
         let half = n / 2;
@@ -55,19 +36,21 @@ impl RoPE<F32, Host> {
         let tensor_cos = self.tensor_cs.slice(0..1, 0..half);
         let tensor_sin = self.tensor_cs.slice(0..1, half..n);
 
-        // x_0 = x[0..half]
-        // x_1 = x[half..head_size]
+        tmp.copy(&x)?;
+        let tmp0 = tmp.slice(0..1, 0..half);
+        let tmp1 = tmp.slice(0..1, half..n);
 
-        // clone x_0 to tmp.
-        // x_0 = -1 * x_1 ** sin.
-        // x_1 = x_1 ** cos.
-        // x_0 += tmp ** cos.
-        // x_1 += tmp ** sin.
-        todo!()
+        let (mut x0, mut x1) = x.slice_mut(0..1, 0..self.head_size).split_col(half)?;
+
+        x0.mul_elementwise(&x1, &tensor_sin, -1.0)?;
+        x1.mul_elementwise(&tmp1, &tensor_cos, 1.0)?;
+        x0.mul_elementwise(&tmp0, &tensor_cos, 1.0)?;
+        x1.mul_elementwise(&tmp0, &tensor_sin, 1.0)?;
+
+        Ok(())
     }
 
-    pub(crate) fn take_storage(self) -> () {
-        // return cos & sin data
-        todo!()
+    pub(crate) fn take_storage(self) -> MmapMut {
+        self.tensor_cs.take_storage()
     }
 }

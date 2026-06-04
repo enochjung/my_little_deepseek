@@ -26,8 +26,8 @@ pub struct Model {
     pub(crate) rope_theta: f32,
 
     tokenizer: Tokenizer,
-    embedding: Embedding<F32, Host>,
-    attentions: Vec<Attention<F32, Host>>,
+    embedding: Embedding<F32, Mmap>,
+    attentions: Vec<Attention<F32, Mmap>>,
 }
 
 impl Model {
@@ -130,17 +130,23 @@ impl Model {
     }
 
     pub(crate) fn decode(&self, token: u32, kv_cache: &mut KVCache) -> Result<u32, crate::Error> {
-        let tmp_storage = MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?;
-        let mut residual = Tensor::<Mut, F32, Host>::new(tmp_storage, 1, self.hidden_size, true)?;
+        let mut residual = Tensor::<F32, MmapMut>::new(
+            MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?,
+            0,
+            1,
+            self.hidden_size,
+            self.hidden_size,
+            true,
+        )?;
 
         let mut x = self.build_embedding_tensor(&[token])?;
 
         for layer in 0..self.num_hidden_layers {
-            residual.copy(0, 0, &x)?;
+            residual.copy(&x)?;
             self.run_attention_block(&mut x, kv_cache, layer)?;
             x.add(&residual)?;
 
-            residual.copy(0, 0, &x)?;
+            residual.copy(&x)?;
             self.run_mlp_block(&mut x, layer)?;
             x.add(&residual)?;
         }
@@ -152,16 +158,25 @@ impl Model {
     fn build_embedding_tensor(
         &self,
         token_ids: &[u32],
-    ) -> Result<Tensor<'static, Mut, F32, Host>, crate::Error> {
+    ) -> Result<Tensor<F32, MmapMut>, crate::Error> {
         let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
         let storage = MmapMut::new(size)?;
-        let mut tensor =
-            Tensor::<Mut, F32, Host>::new(storage, token_ids.len() as u32, self.hidden_size, true)?;
+        let mut tensor = Tensor::<F32, MmapMut>::new(
+            storage,
+            0,
+            token_ids.len() as u32,
+            self.hidden_size,
+            self.hidden_size,
+            true,
+        )?;
 
         for i in 0..token_ids.len() {
             let token_id = token_ids[i];
             let embed_tensor = self.embedding.word_embed(token_id)?;
-            tensor.copy(i as u32, 0, &embed_tensor)?;
+
+            let rows = (i as u32)..(i as u32 + 1);
+            let cols = 0..self.hidden_size;
+            tensor.slice_mut(rows, cols).copy(&embed_tensor)?;
         }
 
         Ok(tensor)
@@ -169,7 +184,7 @@ impl Model {
 
     fn run_attention_block(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<F32, MmapMut>,
         kv_cache: &mut KVCache,
         layer: usize,
     ) -> Result<(), crate::Error> {
@@ -178,7 +193,7 @@ impl Model {
 
     fn run_mlp_block(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<F32, MmapMut>,
         layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
@@ -205,7 +220,7 @@ impl Model {
         */
     }
 
-    fn run_output_block(&self, x: Tensor<'static, Mut, F32, Host>) -> Result<u32, crate::Error> {
+    fn run_output_block(&self, x: Tensor<F32, MmapMut>) -> Result<u32, crate::Error> {
         todo!()
         /*
         // [Shape] final_x: [1, 1536]
@@ -231,25 +246,32 @@ impl Model {
 fn build_tensor_f32(
     storage_bf16: &Mmap,
     weight_info_bf16: &WeightInfo,
-) -> Result<Tensor<'static, Own, F32, Host>, crate::Error> {
+) -> Result<Tensor<F32, Mmap>, crate::Error> {
     let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
         [] => return Err(crate::Error::broken_data(0)),
         [ncol] => (1, *ncol),
         [nrow, ncol] => (*nrow, *ncol),
         _ => return Err(crate::Error::broken_data(0)),
     };
-    let tensor_bf16 = Tensor::<Ref, BF16, Host>::new(
+    let tensor_bf16 = Tensor::<BF16, &Mmap>::new(
         storage_bf16,
         weight_info_bf16.offset.start,
         nrow,
         ncol,
+        ncol,
         true,
     )?;
 
-    let storage_f32 = MmapMut::new(nrow as usize * ncol as usize * F32::BYTES)?;
-    let mut tensor_f32 = Tensor::<Mut, F32, Host>::new(storage_f32, nrow, ncol, true)?;
+    let mut tensor_f32 = Tensor::<F32, MmapMut>::new(
+        MmapMut::new(nrow as usize * ncol as usize * F32::BYTES)?,
+        0,
+        nrow,
+        ncol,
+        ncol,
+        true,
+    )?;
     tensor_f32.cast(&tensor_bf16)?;
-    Ok(tensor_f32.to_readonly())
+    Ok(tensor_f32.into_readonly())
 }
 
 pub(crate) struct WeightInfo {
@@ -387,7 +409,6 @@ fn take_tensor(
 mod tests {
     use super::Model;
     use crate::config::*;
-    use crate::tensor::*;
 
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
     const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
@@ -416,22 +437,11 @@ mod tests {
         Model::new(conf).expect("initializing model should succeed")
     }
 
-    fn assert_embedding_values<'t>(tensor: Tensor<'t, Ref, F32, Host>, expected_rows: &[[f32; 5]]) {
-        let slice_tensor = tensor.slice(0..4, 0..5);
-        let vec = expected_rows
-            .iter()
-            .flat_map(|row| row.iter())
-            .map(|&val| val)
-            .collect::<Vec<_>>();
-        slice_tensor.assert(&vec);
-    }
-
     #[test]
     fn case01_embedding_hello_world() {
-        // Expected embedding values for "Hello, world!" -> token_ids: [9707, 11, 1879, 0]
-        // Each row is the first 5 columns (0..5) of the embedding vector from test_model/embed.data
+        // "Hello, world!" -> token_ids: [9707, 11, 1879, 0]
+        let token_ids = [9707, 11, 1879, 0];
         let expected_rows = [
-            // Row 0 (token_id: 9707)
             [
                 0.02978515625,
                 0.03662109375,
@@ -439,7 +449,6 @@ mod tests {
                 -0.001953125,
                 0.05419921875,
             ],
-            // Row 1 (token_id: 11)
             [
                 0.04833984375,
                 -0.031494140625,
@@ -447,7 +456,6 @@ mod tests {
                 0.0023193359375,
                 -0.031982421875,
             ],
-            // Row 2 (token_id: 1879)
             [
                 0.026611328125,
                 -0.062255859375,
@@ -455,7 +463,6 @@ mod tests {
                 -0.0341796875,
                 0.034912109375,
             ],
-            // Row 3 (token_id: 0)
             [
                 0.0732421875,
                 0.03515625,
@@ -465,19 +472,11 @@ mod tests {
             ],
         ];
 
-        // Token IDs for "Hello, world!"
-        let token_ids = [9707, 11, 1879, 0];
-
         let model = get_model();
-
-        let embed_tensor = model
+        let tensor = model
             .build_embedding_tensor(&token_ids)
             .expect("appending embedding vectors should succeed");
 
-        let nrow = token_ids.len() as u32;
-        let ncol = model.hidden_size;
-        let embed_tensor_ref = embed_tensor.slice(0..nrow, 0..ncol);
-
-        assert_embedding_values(embed_tensor_ref, &expected_rows);
+        tensor.slice(0..4, 0..5).assert(&expected_rows);
     }
 }

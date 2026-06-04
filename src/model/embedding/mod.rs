@@ -2,16 +2,13 @@ use super::{WeightInfo, build_tensor_f32};
 use crate::storage::*;
 use crate::tensor::*;
 
-pub(crate) struct Embedding<E: ElemType, L: Location>
-where
-    Own: StorageType<'static, L>,
-{
-    embed_weight: Tensor<'static, Own, E, L>,
+pub(crate) struct Embedding<E: ElemType, O: Owned> {
+    embed_weight: Tensor<E, O>,
     nrow: u32,
     ncol: u32,
 }
 
-impl Embedding<F32, Host> {
+impl Embedding<F32, Mmap> {
     pub(crate) fn new(
         weight_storage: &Mmap,
         embed_info: &WeightInfo,
@@ -26,10 +23,7 @@ impl Embedding<F32, Host> {
         })
     }
 
-    pub(crate) fn word_embed<'a>(
-        &'a self,
-        token_id: u32,
-    ) -> Result<Tensor<'a, Ref, F32, Host>, crate::Error> {
+    pub(crate) fn word_embed(&self, token_id: u32) -> Result<Tensor<F32, &Mmap>, crate::Error> {
         if token_id >= self.nrow {
             return Err(crate::Error::out_of_bound(
                 token_id as usize,
