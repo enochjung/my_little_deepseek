@@ -70,10 +70,10 @@ impl Layout {
 pub(crate) trait StorageType<'a, L: Location> {
     type Memory: Storage;
 }
-impl<'a> StorageType<'a, Host> for Own {
+impl StorageType<'static, Host> for Own {
     type Memory = Mmap;
 }
-impl<'a> StorageType<'a, Host> for Mut {
+impl StorageType<'static, Host> for Mut {
     type Memory = MmapMut;
 }
 impl<'a> StorageType<'a, Host> for Ref {
@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<'a, E> Tensor<'a, Own, E, Host>
+impl<E> Tensor<'static, Own, E, Host>
 where
     E: ElemType,
 {
@@ -143,7 +143,7 @@ where
     }
 }
 
-impl<'a, E> Tensor<'a, Mut, E, Host>
+impl<E> Tensor<'static, Mut, E, Host>
 where
     E: ElemType,
 {
@@ -160,7 +160,7 @@ where
         }
     }
 
-    pub(crate) fn to_readonly(self) -> Tensor<'a, Own, E, Host> {
+    pub(crate) fn to_readonly(self) -> Tensor<'static, Own, E, Host> {
         Tensor {
             data: self.data.into(),
             layout: self.layout,
@@ -190,7 +190,7 @@ where
     }
 }
 
-impl<E> Tensor<'_, Own, E, Host>
+impl<E> Tensor<'static, Own, E, Host>
 where
     E: ElemType,
 {
@@ -217,7 +217,7 @@ where
     }
 }
 
-impl<E> Tensor<'_, Mut, E, Host>
+impl<E> Tensor<'static, Mut, E, Host>
 where
     E: ElemType,
 {
@@ -243,7 +243,7 @@ where
         })
     }
 }
-impl<'a> Tensor<'a, Mut, F32, Host> {
+impl Tensor<'static, Mut, F32, Host> {
     pub(crate) fn copy<'b, O>(
         &mut self,
         row_idx: u32,

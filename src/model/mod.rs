@@ -169,7 +169,7 @@ impl Model {
 
     fn run_attention_block(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         kv_cache: &mut KVCache,
         layer: usize,
     ) -> Result<(), crate::Error> {
@@ -178,7 +178,7 @@ impl Model {
 
     fn run_mlp_block(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
@@ -205,7 +205,7 @@ impl Model {
         */
     }
 
-    fn run_output_block(&self, x: Tensor<Mut, F32, Host>) -> Result<u32, crate::Error> {
+    fn run_output_block(&self, x: Tensor<'static, Mut, F32, Host>) -> Result<u32, crate::Error> {
         todo!()
         /*
         // [Shape] final_x: [1, 1536]
@@ -228,10 +228,10 @@ impl Model {
     }
 }
 
-fn build_tensor_f32<'a>(
+fn build_tensor_f32(
     storage_bf16: &Mmap,
     weight_info_bf16: &WeightInfo,
-) -> Result<Tensor<'a, Own, F32, Host>, crate::Error> {
+) -> Result<Tensor<'static, Own, F32, Host>, crate::Error> {
     let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
         [] => return Err(crate::Error::broken_data(0)),
         [ncol] => (1, *ncol),

@@ -47,8 +47,8 @@ impl RoPE<F32, Host> {
     // tmp: (1 * head_dim/2)
     pub(crate) fn run_rope(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
-        tmp: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
+        tmp: &mut Tensor<'static, Mut, F32, Host>,
     ) -> Result<(), crate::Error> {
         // https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py#L116
 

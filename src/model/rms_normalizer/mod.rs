@@ -17,7 +17,7 @@ impl RMSNormalizer<F32, Host> {
 
     pub(crate) fn run_rms_norm(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {
         x.rms_norm(&self.norm_weight, rms_norm_epsilon)

@@ -50,7 +50,7 @@ impl Attention<F32, Host> {
 
     pub(crate) fn run_attention(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         kv_cache: &mut KVCache,
         rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {
