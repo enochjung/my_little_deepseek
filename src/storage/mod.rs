@@ -2,39 +2,54 @@ mod mmap;
 
 pub(crate) use mmap::{Mmap, MmapMut};
 
+pub(crate) trait Location {}
+pub(crate) struct Host;
+impl Location for Host {}
+#[allow(unused)]
+pub(crate) struct Device;
+impl Location for Device {}
+
 pub(crate) trait Storage {
+    type Loc: Location;
+
     fn len(&self) -> usize;
     fn as_ptr(&self) -> *const ();
 }
-impl Storage for Mmap {
+
+pub(crate) trait Mutable: Storage {
+    fn as_mut_ptr(&mut self) -> *mut ();
+    fn resize(&mut self, len: usize) -> Result<(), crate::Error>;
+}
+
+impl<'a, S: Storage> Storage for &'a S {
+    type Loc = S::Loc;
     fn len(&self) -> usize {
-        self.len()
+        (**self).len()
     }
     fn as_ptr(&self) -> *const () {
-        self.as_ptr()
+        (**self).as_ptr()
     }
 }
-impl Storage for MmapMut {
+impl<'a, M: Mutable> Storage for &'a mut M {
+    type Loc = M::Loc;
     fn len(&self) -> usize {
-        self.len()
+        (**self).len()
     }
     fn as_ptr(&self) -> *const () {
-        self.as_ptr()
+        (**self).as_ptr()
     }
 }
-impl<'a> Storage for &'a Mmap {
-    fn len(&self) -> usize {
-        (*self).len()
+impl<'a, M: Mutable> Mutable for &'a mut M {
+    fn as_mut_ptr(&mut self) -> *mut () {
+        (**self).as_mut_ptr()
     }
-    fn as_ptr(&self) -> *const () {
-        (*self).as_ptr()
+    fn resize(&mut self, len: usize) -> Result<(), crate::Error> {
+        (**self).resize(len)
     }
 }
-impl<'a> Storage for &'a mut MmapMut {
-    fn len(&self) -> usize {
-        (*self).len()
-    }
-    fn as_ptr(&self) -> *const () {
-        (*self).as_ptr()
-    }
+
+pub(crate) trait Owned: Storage {
+    type ReadOnly: Storage<Loc = Self::Loc> + Owned;
+
+    fn into_readonly(self) -> Self::ReadOnly;
 }

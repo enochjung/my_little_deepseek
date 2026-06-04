@@ -4,21 +4,18 @@ use crate::session::KVCache;
 use crate::storage::*;
 use crate::tensor::*;
 
-pub(crate) struct Attention<E: ElemType, L: Location>
-where
-    OwnConst: StorageType<'static, L>,
-{
-    q_bias: Tensor<'static, OwnConst, E, L>,
-    q_weight: Tensor<'static, OwnConst, E, L>,
-    k_bias: Tensor<'static, OwnConst, E, L>,
-    k_weight: Tensor<'static, OwnConst, E, L>,
-    v_bias: Tensor<'static, OwnConst, E, L>,
-    v_weight: Tensor<'static, OwnConst, E, L>,
-    o_weight: Tensor<'static, OwnConst, E, L>,
-    rms_normalizer: RMSNormalizer<E, L>,
+pub(crate) struct Attention<E: ElemType, O: Owned> {
+    q_bias: Tensor<E, O>,
+    q_weight: Tensor<E, O>,
+    k_bias: Tensor<E, O>,
+    k_weight: Tensor<E, O>,
+    v_bias: Tensor<E, O>,
+    v_weight: Tensor<E, O>,
+    o_weight: Tensor<E, O>,
+    rms_normalizer: RMSNormalizer<E, O>,
 }
 
-impl Attention<F32, Host> {
+impl Attention<F32, Mmap> {
     pub(crate) fn new(
         weight_storage: &Mmap,
         attention_weight_info: &AttentionLayerWeightInfo,
@@ -50,7 +47,7 @@ impl Attention<F32, Host> {
 
     pub(crate) fn run_attention(
         &self,
-        x: &mut Tensor<'static, OwnMut, F32, Host>,
+        x: &mut Tensor<F32, MmapMut>,
         kv_cache: &mut KVCache,
         rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {

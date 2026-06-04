@@ -1,3 +1,4 @@
+use super::{Host, Mutable, Owned, Storage};
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
@@ -20,19 +21,28 @@ impl Mmap {
         Ok(Self { ptr, len })
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const () {
-        self.ptr
-    }
-
     pub(crate) fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
     }
 }
 
+impl Storage for Mmap {
+    type Loc = Host;
+
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn as_ptr(&self) -> *const () {
+        self.ptr
+    }
+}
+impl Owned for Mmap {
+    type ReadOnly = Mmap;
+
+    fn into_readonly(self) -> Self::ReadOnly {
+        self
+    }
+}
 impl Drop for Mmap {
     fn drop(&mut self) {
         unsafe {
@@ -55,40 +65,39 @@ impl MmapMut {
             len,
         })
     }
+}
 
-    pub(crate) fn resize(&mut self, len: usize) -> Result<(), crate::Error> {
+impl Storage for MmapMut {
+    type Loc = Host;
+
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn as_ptr(&self) -> *const () {
+        self.ptr as *const ()
+    }
+}
+impl Mutable for MmapMut {
+    fn as_mut_ptr(&mut self) -> *mut () {
+        self.ptr as *mut ()
+    }
+    fn resize(&mut self, len: usize) -> Result<(), crate::Error> {
         let ptr = resize_mmap(self.ptr, self.len, len).map_err(crate::Error::io)?;
         self.ptr = ptr;
         self.len = len;
         Ok(())
     }
+}
+impl Owned for MmapMut {
+    type ReadOnly = Mmap;
 
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const () {
-        self.ptr
-    }
-
-    pub(crate) fn as_mut_ptr(&mut self) -> *mut () {
-        self.ptr as *mut ()
-    }
-
-    pub(crate) fn as_const_mmap(&self) -> &Mmap {
-        unsafe { &*(self as *const MmapMut as *const Mmap) }
+    fn into_readonly(self) -> Self::ReadOnly {
+        let ptr = self.ptr;
+        let len = self.len;
+        std::mem::forget(self);
+        Self::ReadOnly { ptr, len }
     }
 }
-
-impl From<MmapMut> for Mmap {
-    fn from(value: MmapMut) -> Self {
-        let ptr = value.ptr;
-        let len = value.len;
-        std::mem::forget(value);
-        Self { ptr, len }
-    }
-}
-
 impl Drop for MmapMut {
     fn drop(&mut self) {
         unsafe {
@@ -157,5 +166,31 @@ fn resize_mmap(ptr: *mut (), prev_len: usize, new_len: usize) -> Result<*mut (),
         }
 
         Ok(new_ptr as *mut ())
+    }
+}
+
+#[cfg(test)]
+impl From<&[f32]> for Mmap {
+    /// Test Helper Function
+    fn from(value: &[f32]) -> Self {
+        MmapMut::from(value).into_readonly()
+    }
+}
+
+#[cfg(test)]
+impl From<&[f32]> for MmapMut {
+    /// Test Helper Function
+    fn from(value: &[f32]) -> Self {
+        use crate::tensor::{ElemType, F32};
+
+        let len = value.len() * F32::BYTES;
+        let mut mmap = MmapMut::new(len).expect("allocating mmap should succeed");
+
+        let src = value.as_ptr();
+        let dst = mmap.as_mut_ptr() as *mut f32;
+        let count = value.len();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, count) };
+
+        mmap
     }
 }
