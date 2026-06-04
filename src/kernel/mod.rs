@@ -145,62 +145,119 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     }
 }
 
-/// Computes `C = C * A + B` for one row.
-///
-/// # Parameters
-///
-/// - `c`: `C` base pointer, shape `(1, n)`.
-/// - `rmc`: `true` if `C` is row-major.
-/// - `ldc`: `C` leading dimension.
-/// - `a`: `A` base pointer, shape `(n, n)`.
-/// - `rma`: `true` if `A` is row-major.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(1, n)`.
-/// - `n`: Column count of `C` and `B`, and both dimensions of `A`.
+/// Fills `x[0..n]` with RoPE cosine factors computed as:
+/// `cos(k / (theta^(2 * i / d)))` for `i` in `0..n`.
 ///
 /// # Safety
 ///
-/// - `c`, `a`, and `b` cover the required ranges for `n`, layout flags, and strides.
+/// - `x` must be valid for writes of `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// - `theta` and `d` should be positive to avoid undefined behavior in the power.
+pub(crate) unsafe fn rope_cos_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::rope_cos_n_avx512(x, n, k, theta, d) };
+        }
+    }
+
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+    let mut i: usize = 0;
+
+    while ptr != end {
+        let angle = k / theta.powf(2.0 * (i as f32) / d);
+        unsafe { *ptr = angle.cos() };
+        ptr = unsafe { ptr.add(1) };
+        i += 1;
+    }
+}
+
+/// Fills `x[0..n]` with RoPE sine factors computed as:
+/// `sin(k / (theta^(2 * i / d)))` for `i` in `0..n`.
+///
+/// # Safety
+///
+/// - `x` must be valid for writes of `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// - `theta` and `d` should be positive to avoid undefined behavior in the power.
+pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::rope_sin_n_avx512(x, n, k, theta, d) };
+        }
+    }
+
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+    let mut i: usize = 0;
+
+    while ptr != end {
+        let angle = k / theta.powf(2.0 * (i as f32) / d);
+        unsafe { *ptr = angle.sin() };
+        ptr = unsafe { ptr.add(1) };
+        i += 1;
+    }
+}
+
+/// Computes `D = A * B + c` with `c` broadcasted.
+///
+/// # Parameters
+///
+/// - `d`: `D` base pointer, shape `(m, n)`.
+/// - `rmd`: `true` if `D` is row-major.
+/// - `ldd`: `D` leading dimension.
+/// - `a`: `A` base pointer, shape `(m, k)`.
+/// - `rma`: `true` if `A` is row-major.
+/// - `lda`: `A` leading dimension.
+/// - `b`: `B` base pointer, shape `(k, n)`.
+/// - `rmb`: `true` if `B` is row-major.
+/// - `ldb`: `B` leading dimension.
+/// - `c`: `c` base pointer, shape `(1, n)`.
+/// - `buf`: Temporary storage for `n` `f32` values.
+/// - `m`: shape `m`
+/// - `k`: shape `k`.
+/// - `n`: shape `n`.
+///
+/// # Safety
+///
+/// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
 /// - `buf` covers at least `n` `f32` values and is 64-byte aligned.
-/// - `c`, `a`, and `b` do not overlap.
-/// - `c`, `a`, and `b` are 4-byte aligned.
-pub(crate) unsafe fn muladd_1n_nn_1n(
-    c: *mut f32,
-    rmc: bool,
-    ldc: usize,
+/// - `a`, `b`, `c`, and `d` do not overlap.
+/// - `a`, `b`, `c`, and `d` are 4-byte aligned.
+pub(crate) unsafe fn muladd_mk_kn_1n(
+    d: *mut f32,
+    rmd: bool,
+    ldd: usize,
     a: *const f32,
     rma: bool,
     lda: usize,
     b: *const f32,
+    rmb: bool,
+    ldb: usize,
+    c: *const f32,
     buf: *mut f32,
+    m: usize,
+    k: usize,
     n: usize,
 ) -> () {
-    let _ = ldc;
-
-    match (rmc, rma) {
-        (true, true) => {
+    match (rmd, rma, rmb) {
+        (true, true, true) => {
             #[cfg(target_arch = "x86_64")]
             {
                 if is_x86_feature_detected!("avx512f") {
-                    return unsafe { x86_64::muladd_r1n_rnn_1n_avx512(c, a, lda, b, buf, n) };
+                    return unsafe {
+                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, buf, m, k, n)
+                    };
                 }
             }
-
-            return unsafe { muladd_r1n_rnn_1n(c, a, lda, b, buf, n) };
         }
-        _ => unimplemented!(),
+        _ => {}
     }
-}
 
-unsafe fn muladd_r1n_rnn_1n(
-    c: *mut f32,
-    a: *const f32,
-    lda: usize,
-    b: *const f32,
-    buf: *mut f32,
-    n: usize,
-) -> () {
-    // Copy `c` into `buf`.
+    todo!()
+    /*
     let c_src_end = unsafe { c.add(n) };
     let mut c_src = c as *const f32;
     let mut c_dst = buf;
@@ -226,7 +283,7 @@ unsafe fn muladd_r1n_rnn_1n(
     let mut ki = 0usize;
     let out_end = unsafe { c.add(n) };
 
-    while ki < n {
+    while ki < k {
         let c_scalar = unsafe { *buf.add(ki) };
         let mut a_ptr = unsafe { a.add(ki * lda) };
         let mut out_ptr = c;
@@ -239,65 +296,7 @@ unsafe fn muladd_r1n_rnn_1n(
 
         ki += 1;
     }
-}
-
-/// Computes `C = C * A + B` for `m` rows.
-///
-/// # Parameters
-///
-/// - `c`: `C` base pointer, shape `(m, n)`.
-/// - `rmc`: `true` if `C` is row-major.
-/// - `ldc`: `C` leading dimension.
-/// - `a`: `A` base pointer, shape `(n, n)`.
-/// - `rma`: `true` if `A` is row-major.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(1, n)`.
-/// - `buf`: Temporary storage for `n` `f32` values.
-/// - `m`: Row count of `C`.
-/// - `n`: Column count of `C` and `B`, and both dimensions of `A`.
-///
-/// # Safety
-///
-/// - `c`, `a`, and `b` cover the required ranges for `m`, `n`, layout flags, and strides.
-/// - `buf` covers at least `n` `f32` values and is 64-byte aligned.
-/// - `c`, `a`, and `b` do not overlap.
-/// - `c`, `a`, and `b` are 4-byte aligned.
-pub(crate) unsafe fn muladd_mn_nn_1n(
-    c: *mut f32,
-    rmc: bool,
-    ldc: usize,
-    a: *const f32,
-    rma: bool,
-    lda: usize,
-    b: *const f32,
-    buf: *mut f32,
-    m: usize,
-    n: usize,
-) -> () {
-    match (rmc, rma) {
-        (true, true) => {
-            let mut c_row = c;
-            let c_row_end = unsafe { c.add(m * ldc) };
-
-            #[cfg(target_arch = "x86_64")]
-            {
-                if is_x86_feature_detected!("avx512f") {
-                    while c_row != c_row_end {
-                        unsafe { x86_64::muladd_r1n_rnn_1n_avx512(c_row, a, lda, b, buf, n) };
-                        c_row = unsafe { c_row.add(ldc) };
-                    }
-                    return;
-                }
-            }
-            {
-                while c_row != c_row_end {
-                    unsafe { muladd_r1n_rnn_1n(c_row, a, lda, b, buf, n) };
-                    c_row = unsafe { c_row.add(ldc) };
-                }
-            }
-        }
-        _ => unimplemented!(),
-    }
+    */
 }
 
 #[cfg(test)]
@@ -350,6 +349,30 @@ mod tests {
         ];
         for i in 0..y.len() {
             assert!((y[i] - expected[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn case05_rope_cos_n5() {
+        let mut buf = [0.0f32; 5];
+        unsafe { rope_cos_n(buf.as_mut_ptr(), 5, 3.0, 10000.0, 128.0) };
+
+        for i in 0..5usize {
+            let angle = 3.0f32 / 10000.0f32.powf(2.0 * (i as f32) / 128.0);
+            let expected = angle.cos();
+            assert!((buf[i] - expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn case06_rope_sin_n5() {
+        let mut buf = [0.0f32; 5];
+        unsafe { rope_sin_n(buf.as_mut_ptr(), 5, 3.0, 10000.0, 128.0) };
+
+        for i in 0..5usize {
+            let angle = 3.0f32 / 10000.0f32.powf(2.0 * (i as f32) / 128.0);
+            let expected = angle.sin();
+            assert!((buf[i] - expected).abs() < 1e-6);
         }
     }
 }

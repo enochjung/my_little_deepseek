@@ -138,14 +138,83 @@ pub(crate) unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn muladd_r1n_rnn_1n_avx512(
-    c: *mut f32,
+pub(crate) unsafe fn rope_cos_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
+    let vec_end = unsafe { x.add(n & !15) };
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+    let mut i: usize = 0;
+
+    while ptr != vec_end {
+        let mut tmp: [f32; 16] = [0.0; 16];
+        for j in 0..16 {
+            let idx = i + j;
+            let angle = k / theta.powf(2.0 * (idx as f32) / d);
+            tmp[j] = angle.cos();
+        }
+
+        let out_v = _mm512_loadu_ps(tmp.as_ptr());
+        _mm512_storeu_ps(ptr, out_v);
+
+        ptr = unsafe { ptr.add(16) };
+        i += 16;
+    }
+
+    while ptr != end {
+        let angle = k / theta.powf(2.0 * (i as f32) / d);
+        unsafe { *ptr = angle.cos() };
+        ptr = unsafe { ptr.add(1) };
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn rope_sin_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
+    let vec_end = unsafe { x.add(n & !15) };
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+    let mut i: usize = 0;
+
+    while ptr != vec_end {
+        let mut tmp: [f32; 16] = [0.0; 16];
+        for j in 0..16 {
+            let idx = i + j;
+            let angle = k / theta.powf(2.0 * (idx as f32) / d);
+            tmp[j] = angle.sin();
+        }
+
+        let out_v = _mm512_loadu_ps(tmp.as_ptr());
+        _mm512_storeu_ps(ptr, out_v);
+
+        ptr = unsafe { ptr.add(16) };
+        i += 16;
+    }
+
+    while ptr != end {
+        let angle = k / theta.powf(2.0 * (i as f32) / d);
+        unsafe { *ptr = angle.sin() };
+        ptr = unsafe { ptr.add(1) };
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn muladd_rmk_rkn_r1n_avx512(
+    d: *mut f32,
+    ldd: usize,
     a: *const f32,
     lda: usize,
     b: *const f32,
+    ldb: usize,
+    c: *const f32,
     buf: *mut f32,
+    m: usize,
+    k: usize,
     n: usize,
 ) -> () {
+    todo!()
+    /*
     // Copy `c` into `buf`.
     let mut c_src = c as *const f32;
     let mut c_dst = buf;
@@ -184,7 +253,7 @@ pub(crate) unsafe fn muladd_r1n_rnn_1n_avx512(
     let mut ki = 0usize;
     let out_vec_end_base = unsafe { c.add(n & !15) };
     let out_end_base = unsafe { c.add(n) };
-    while ki < n {
+    while ki < k {
         let c_scalar = unsafe { *buf.add(ki) };
         let c_vec = _mm512_set1_ps(c_scalar);
 
@@ -208,4 +277,5 @@ pub(crate) unsafe fn muladd_r1n_rnn_1n_avx512(
 
         ki += 1;
     }
+    */
 }

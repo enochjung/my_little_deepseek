@@ -321,6 +321,26 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         Ok(())
     }
 
+    pub(crate) fn rope_cs(
+        &mut self,
+        token_index: u32,
+        rope_theta: f32,
+        head_size: u32,
+    ) -> Result<(), crate::Error> {
+        validate_shape(self.layout.nrow, self.layout.ncol, 1, head_size)?;
+
+        let ptr = self.data.as_mut_ptr() as *mut f32;
+        let n = head_size as usize / 2;
+        let k = token_index as f32;
+        let d = head_size as f32;
+
+        // Fill first half with cos factors, second half with sin factors.
+        unsafe { kernel::rope_cos_n(ptr, n, k, rope_theta, d) };
+        unsafe { kernel::rope_sin_n(ptr.add(n), n, k, rope_theta, d) };
+
+        Ok(())
+    }
+
     pub(crate) fn add<'b, O>(
         &mut self,
         other: &Tensor<'b, O, F32, Host>,
@@ -364,7 +384,7 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
         Ok(())
     }
 
-    pub fn rms_norm<'b, O>(
+    pub(crate) fn rms_norm<'b, O>(
         &mut self,
         weight: &Tensor<'b, O, F32, Host>,
         epsilon: f32,
@@ -421,61 +441,69 @@ impl<'a> Tensor<'a, Mut, F32, Host> {
     }
      */
 
-    /*
-    pub(crate) fn muladd<T: TensorTrait<F32, Host> + ?Sized>(
+    // self = AB + c
+    // shape of self must be (A.nrow * B.ncol)
+    // A.ncol may 1536
+    // B.nrow must be equal to A.ncol
+    // shape of C must be (1 * B.ncol)
+    // c is expanded in calculation
+    pub(crate) fn muladd_broadcast<'b, O>(
         &mut self,
-        _weight: &T,
-        _bias: &T,
-    ) -> Result<(), crate::Error> {
-        todo!()
-        let [m, n] = self.shape();
-        let w_shape = weight.shape();
-        let b_shape = bias.shape();
+        #[allow(non_snake_case)] A: &Tensor<'b, O, F32, Host>,
+        #[allow(non_snake_case)] B: &Tensor<'b, O, F32, Host>,
+        c: &Tensor<'b, O, F32, Host>,
+    ) -> Result<(), crate::Error>
+    where
+        O: Ownership + StorageType<'b, Host>,
+    {
+        validate_shape(
+            self.layout.nrow,
+            self.layout.ncol,
+            A.layout.nrow,
+            B.layout.ncol,
+        )?;
+        validate_shape(
+            A.layout.nrow,
+            A.layout.ncol,
+            self.layout.ncol,
+            B.layout.nrow,
+        )?;
+        validate_shape(c.layout.nrow, c.layout.ncol, 1, B.layout.ncol)?;
 
-        if w_shape[0] != n || w_shape[1] != n {
-            return Err(crate::Error::shape_mismatch(
-                n as usize,
-                w_shape[0] as usize,
-            ));
-        }
+        let m = A.layout.nrow as usize;
+        let k = A.layout.ncol as usize;
+        let n = B.layout.ncol as usize;
 
-        if !(b_shape[0] == 1 && b_shape[1] == n) {
-            return Err(crate::Error::shape_mismatch(1, b_shape[0] as usize));
-        }
+        let dst = self.data.as_mut_ptr() as *mut f32;
+        let a = unsafe { A.data.as_ptr().byte_add(A.layout.offset) } as *const f32;
+        let b = unsafe { B.data.as_ptr().byte_add(B.layout.offset) } as *const f32;
+        let c = unsafe { c.data.as_ptr().byte_add(c.layout.offset) } as *const f32;
 
-        if !self.layout().is_row_major() || !weight.layout().is_row_major() {
-            return Err(crate::Error::operation_not_supported(
-                "muladd_weight_bias requires row-major matrices",
-            ));
-        }
+        // TODO: validate size
+        let mut buf: Vec<f32> = vec![0.0f32; n as usize];
+        let buf_ptr = buf.as_mut_ptr();
 
         unsafe {
-            let c_base = self.as_mut_ptr(0, 0)? as *mut f32;
-            let a_base = weight.as_ptr(0, 0) as *const f32;
-            let b_base = bias.as_ptr(0, 0) as *const f32;
-
-            // temporary buffer for one row (or reused across rows)
-            let mut buf: Vec<f32> = vec![0.0f32; n as usize];
-            let buf_ptr = buf.as_mut_ptr();
-
-            x86_64::muladd_mn_nn_1n(
-                c_base,
-                true,
-                self.layout().stride() as usize,
-                a_base,
-                true,
-                weight.layout().stride() as usize,
-                b_base,
+            kernel::muladd_mk_kn_1n(
+                dst,
+                self.layout.is_row_major,
+                self.layout.stride as usize,
+                a,
+                A.layout.is_row_major,
+                A.layout.stride as usize,
+                b,
+                B.layout.is_row_major,
+                B.layout.stride as usize,
+                c,
                 buf_ptr,
-                m as usize,
-                n as usize,
-            );
-        }
+                m,
+                k,
+                n,
+            )
+        };
 
         Ok(())
     }
-
-     */
 }
 
 impl<'a, E> Tensor<'a, Ref, E, Host>
