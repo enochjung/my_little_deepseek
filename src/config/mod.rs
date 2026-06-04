@@ -18,9 +18,12 @@ pub struct Configure {
     pub(crate) vocab_format: Option<VocabFormat>,
     pub(crate) weight_format: Option<WeightFormat>,
     pub(crate) num_hidden_layers: usize,
+    pub(crate) num_attention_heads: usize,
+    pub(crate) num_key_value_heads: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
+    pub(crate) rope_theta: f32,
 }
 
 impl Configure {
@@ -32,9 +35,12 @@ impl Configure {
             vocab_format: None,
             weight_format: None,
             num_hidden_layers: 28,
+            num_attention_heads: 12,
+            num_key_value_heads: 2,
             rms_norm_epsilon: 1e-06,
             hidden_size: 1536,
             intermediate_size: 8960,
+            rope_theta: 10000.0,
         }
     }
 
@@ -68,6 +74,16 @@ impl Configure {
         self
     }
 
+    pub fn num_attention_heads(mut self, value: usize) -> Self {
+        self.num_attention_heads = value;
+        self
+    }
+
+    pub fn num_key_value_heads(mut self, value: usize) -> Self {
+        self.num_key_value_heads = value;
+        self
+    }
+
     pub fn rms_norm_epsilon(mut self, value: f32) -> Self {
         self.rms_norm_epsilon = value;
         self
@@ -80,6 +96,11 @@ impl Configure {
 
     pub fn intermediate_size(mut self, value: u32) -> Self {
         self.intermediate_size = value;
+        self
+    }
+
+    pub fn rope_theta(mut self, value: f32) -> Self {
+        self.rope_theta = value;
         self
     }
 }

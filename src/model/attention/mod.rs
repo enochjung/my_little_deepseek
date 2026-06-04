@@ -50,7 +50,7 @@ impl Attention<F32, Host> {
 
     pub(crate) fn run_attention(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         kv_cache: &mut KVCache,
         rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {
@@ -59,8 +59,6 @@ impl Attention<F32, Host> {
         todo!()
         /*
               // ① Pre-RMS Norm
-              // [Shape] norm_x: [1, 1536]
-              let norm_x = rms_norm(&x, &weights.layers[layer].input_layernorm);
 
               // ② Q, K, V Projection
               // [Shape] q_proj: [1, 1536] (12 heads * 128)

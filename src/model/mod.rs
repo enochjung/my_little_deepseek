@@ -1,6 +1,7 @@
 mod attention;
 mod embedding;
 mod rms_normalizer;
+mod rope;
 mod tokenizer;
 
 use crate::config::{Configure, Format};
@@ -16,9 +17,13 @@ use tokenizer::Tokenizer;
 
 pub struct Model {
     pub(crate) num_hidden_layers: usize,
+    pub(crate) num_attention_heads: usize,
+    pub(crate) num_key_value_heads: usize,
     pub(crate) rms_norm_epsilon: f32,
     pub(crate) hidden_size: u32,
+    pub(crate) head_size: u32,
     pub(crate) intermediate_size: u32,
+    pub(crate) rope_theta: f32,
 
     tokenizer: Tokenizer,
     embedding: Embedding<F32, Host>,
@@ -28,9 +33,24 @@ pub struct Model {
 impl Model {
     pub fn new(configure: Configure) -> Result<Self, crate::Error> {
         let num_hidden_layers = configure.num_hidden_layers;
+        let num_attention_heads = configure.num_attention_heads;
+        let num_key_value_heads = configure.num_key_value_heads;
         let rms_norm_epsilon = configure.rms_norm_epsilon;
         let hidden_size = configure.hidden_size;
         let intermediate_size = configure.intermediate_size;
+        let rope_theta = configure.rope_theta;
+
+        if hidden_size % num_attention_heads as u32 != 0 {
+            return Err(crate::Error::configure_failed(
+                "hidden size & num_attention_heads mismatch",
+            ));
+        }
+        if num_attention_heads % num_key_value_heads != 0 {
+            return Err(crate::Error::configure_failed(
+                "num_attention_heads & num_key_value_heads mismatch",
+            ));
+        }
+        let head_size = hidden_size / num_attention_heads as u32;
 
         let unicode_format = &configure
             .unicode_format
@@ -73,9 +93,13 @@ impl Model {
 
         Ok(Self {
             num_hidden_layers,
+            num_attention_heads,
+            num_key_value_heads,
             rms_norm_epsilon,
             hidden_size,
             intermediate_size,
+            rope_theta,
+            head_size,
 
             tokenizer,
             embedding,
@@ -145,7 +169,7 @@ impl Model {
 
     fn run_attention_block(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         kv_cache: &mut KVCache,
         layer: usize,
     ) -> Result<(), crate::Error> {
@@ -154,7 +178,7 @@ impl Model {
 
     fn run_mlp_block(
         &self,
-        x: &mut Tensor<Mut, F32, Host>,
+        x: &mut Tensor<'static, Mut, F32, Host>,
         layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
@@ -181,7 +205,7 @@ impl Model {
         */
     }
 
-    fn run_output_block(&self, x: Tensor<Mut, F32, Host>) -> Result<u32, crate::Error> {
+    fn run_output_block(&self, x: Tensor<'static, Mut, F32, Host>) -> Result<u32, crate::Error> {
         todo!()
         /*
         // [Shape] final_x: [1, 1536]
@@ -204,10 +228,10 @@ impl Model {
     }
 }
 
-fn build_tensor_f32<'a>(
+fn build_tensor_f32(
     storage_bf16: &Mmap,
     weight_info_bf16: &WeightInfo,
-) -> Result<Tensor<'a, Own, F32, Host>, crate::Error> {
+) -> Result<Tensor<'static, Own, F32, Host>, crate::Error> {
     let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
         [] => return Err(crate::Error::broken_data(0)),
         [ncol] => (1, *ncol),
