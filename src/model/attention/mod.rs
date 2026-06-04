@@ -6,15 +6,15 @@ use crate::tensor::*;
 
 pub(crate) struct Attention<E: ElemType, L: Location>
 where
-    Own: StorageType<'static, L>,
+    OwnConst: StorageType<'static, L>,
 {
-    q_bias: Tensor<'static, Own, E, L>,
-    q_weight: Tensor<'static, Own, E, L>,
-    k_bias: Tensor<'static, Own, E, L>,
-    k_weight: Tensor<'static, Own, E, L>,
-    v_bias: Tensor<'static, Own, E, L>,
-    v_weight: Tensor<'static, Own, E, L>,
-    o_weight: Tensor<'static, Own, E, L>,
+    q_bias: Tensor<'static, OwnConst, E, L>,
+    q_weight: Tensor<'static, OwnConst, E, L>,
+    k_bias: Tensor<'static, OwnConst, E, L>,
+    k_weight: Tensor<'static, OwnConst, E, L>,
+    v_bias: Tensor<'static, OwnConst, E, L>,
+    v_weight: Tensor<'static, OwnConst, E, L>,
+    o_weight: Tensor<'static, OwnConst, E, L>,
     rms_normalizer: RMSNormalizer<E, L>,
 }
 
@@ -50,7 +50,7 @@ impl Attention<F32, Host> {
 
     pub(crate) fn run_attention(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<'static, OwnMut, F32, Host>,
         kv_cache: &mut KVCache,
         rms_norm_epsilon: f32,
     ) -> Result<(), crate::Error> {

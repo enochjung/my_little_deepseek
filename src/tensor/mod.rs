@@ -4,12 +4,14 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 pub(crate) trait Ownership {}
-pub(crate) struct Own;
-impl Ownership for Own {}
-pub(crate) struct Mut;
-impl Ownership for Mut {}
-pub(crate) struct Ref;
-impl Ownership for Ref {}
+pub(crate) struct OwnConst;
+impl Ownership for OwnConst {}
+pub(crate) struct OwnMut;
+impl Ownership for OwnMut {}
+pub(crate) struct RefConst;
+impl Ownership for RefConst {}
+pub(crate) struct RefMut;
+impl Ownership for RefMut {}
 
 pub(crate) trait ElemType {
     const BYTES: usize = 4;
@@ -70,16 +72,24 @@ impl Layout {
 pub(crate) trait StorageType<'a, L: Location> {
     type Memory: Storage;
 }
-impl StorageType<'static, Host> for Own {
+impl StorageType<'static, Host> for OwnConst {
     type Memory = Mmap;
 }
-impl StorageType<'static, Host> for Mut {
+impl StorageType<'static, Host> for OwnMut {
     type Memory = MmapMut;
 }
-impl<'a> StorageType<'a, Host> for Ref {
+impl<'a> StorageType<'a, Host> for RefConst {
     type Memory = &'a Mmap;
 }
-fn ref_mem_from_mmap<'a>(mem: &'a Mmap) -> <Ref as StorageType<'a, Host>>::Memory {
+impl<'a> StorageType<'a, Host> for RefMut {
+    type Memory = &'a mut MmapMut;
+}
+fn ref_mem_from_mmap<'a>(mem: &'a Mmap) -> <RefConst as StorageType<'a, Host>>::Memory {
+    mem
+}
+fn ref_mut_mem_from_mmap_mut<'a>(
+    mem: &'a mut MmapMut,
+) -> <RefMut as StorageType<'a, Host>>::Memory {
     mem
 }
 
@@ -122,11 +132,11 @@ where
     }
 }
 
-impl<E> Tensor<'static, Own, E, Host>
+impl<E> Tensor<'static, OwnConst, E, Host>
 where
     E: ElemType,
 {
-    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<Ref, E, Host> {
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<RefConst, E, Host> {
         let data = ref_mem_from_mmap(&self.data);
         Tensor {
             data,
@@ -136,11 +146,11 @@ where
     }
 }
 
-impl<E> Tensor<'static, Mut, E, Host>
+impl<E> Tensor<'static, OwnMut, E, Host>
 where
     E: ElemType,
 {
-    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<Ref, E, Host> {
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<RefConst, E, Host> {
         let data = ref_mem_from_mmap(self.data.as_const_mmap());
         Tensor {
             data,
@@ -149,7 +159,21 @@ where
         }
     }
 
-    pub(crate) fn to_readonly(self) -> Tensor<'static, Own, E, Host> {
+    pub(crate) fn slice_mut(
+        &mut self,
+        rows: Range<u32>,
+        cols: Range<u32>,
+    ) -> Tensor<RefMut, E, Host> {
+        let layout = self.sliced_layout(rows, cols);
+        let data = ref_mut_mem_from_mmap_mut(&mut self.data);
+        Tensor {
+            data,
+            layout,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub(crate) fn to_readonly(self) -> Tensor<'static, OwnConst, E, Host> {
         Tensor {
             data: self.data.into(),
             layout: self.layout,
@@ -158,18 +182,11 @@ where
     }
 }
 
-impl<'a, E> Tensor<'a, Ref, E, Host>
+impl<'a, E> Tensor<'a, RefConst, E, Host>
 where
     E: ElemType,
 {
-    pub(crate) fn slice<'s>(
-        &'s self,
-        rows: Range<u32>,
-        cols: Range<u32>,
-    ) -> Tensor<'s, Ref, E, Host>
-    where
-        'a: 's,
-    {
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<RefConst, E, Host> {
         let data = ref_mem_from_mmap(self.data);
         Tensor {
             data,
@@ -179,7 +196,135 @@ where
     }
 }
 
-impl<E> Tensor<'static, Own, E, Host>
+impl<'a, E> Tensor<'a, RefMut, E, Host>
+where
+    E: ElemType,
+{
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<RefConst, E, Host> {
+        let data = ref_mem_from_mmap(self.data.as_const_mmap());
+        Tensor {
+            data,
+            layout: self.sliced_layout(rows, cols),
+            _phantom: PhantomData,
+        }
+    }
+
+    pub(crate) fn slice_mut(
+        &mut self,
+        rows: Range<u32>,
+        cols: Range<u32>,
+    ) -> Tensor<RefMut, E, Host> {
+        let layout = self.sliced_layout(rows, cols);
+        let data = ref_mut_mem_from_mmap_mut(self.data);
+        Tensor {
+            data,
+            layout,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub(crate) fn split_row(self, mid: u32) -> Result<(Self, Self), crate::Error> {
+        let Self {
+            data,
+            layout,
+            _phantom,
+        } = self;
+
+        if mid > layout.nrow {
+            return Err(crate::Error::out_of_bound(
+                mid as usize,
+                layout.nrow as usize,
+            ));
+        }
+
+        let data_ptr = data as *mut MmapMut;
+        let offset0 = layout.offset;
+        let tensor0 = Self {
+            data: unsafe { &mut *data_ptr },
+            layout: Layout {
+                offset: offset0,
+                nrow: mid,
+                ncol: layout.ncol,
+                stride: layout.stride,
+                is_row_major: layout.is_row_major,
+            },
+            _phantom: PhantomData,
+        };
+
+        let offset1 = if layout.is_row_major {
+            mid * layout.stride
+        } else {
+            mid
+        } as usize
+            * E::BYTES
+            + layout.offset;
+        let tensor1 = Self {
+            data: unsafe { &mut *data_ptr },
+            layout: Layout {
+                offset: offset1,
+                nrow: layout.nrow - mid,
+                ncol: layout.ncol,
+                stride: layout.stride,
+                is_row_major: layout.is_row_major,
+            },
+            _phantom: PhantomData,
+        };
+
+        Ok((tensor0, tensor1))
+    }
+
+    pub(crate) fn split_col(self, mid: u32) -> Result<(Self, Self), crate::Error> {
+        let Self {
+            data,
+            layout,
+            _phantom,
+        } = self;
+
+        if mid > layout.ncol {
+            return Err(crate::Error::out_of_bound(
+                mid as usize,
+                layout.ncol as usize,
+            ));
+        }
+
+        let data_ptr = data as *mut MmapMut;
+        let offset0 = layout.offset;
+        let tensor0 = Self {
+            data: unsafe { &mut *data_ptr },
+            layout: Layout {
+                offset: offset0,
+                nrow: layout.nrow,
+                ncol: mid,
+                stride: layout.stride,
+                is_row_major: layout.is_row_major,
+            },
+            _phantom: PhantomData,
+        };
+
+        let offset1 = if layout.is_row_major {
+            mid
+        } else {
+            mid * layout.stride
+        } as usize
+            * E::BYTES
+            + layout.offset;
+        let tensor1 = Self {
+            data: unsafe { &mut *data_ptr },
+            layout: Layout {
+                offset: offset1,
+                nrow: layout.nrow,
+                ncol: layout.ncol - mid,
+                stride: layout.stride,
+                is_row_major: layout.is_row_major,
+            },
+            _phantom: PhantomData,
+        };
+
+        Ok((tensor0, tensor1))
+    }
+}
+
+impl<E> Tensor<'static, OwnConst, E, Host>
 where
     E: ElemType,
 {
@@ -206,7 +351,7 @@ where
     }
 }
 
-impl<E> Tensor<'static, Mut, E, Host>
+impl<E> Tensor<'static, OwnMut, E, Host>
 where
     E: ElemType,
 {
@@ -232,7 +377,8 @@ where
         })
     }
 }
-impl Tensor<'static, Mut, F32, Host> {
+
+impl Tensor<'static, OwnMut, F32, Host> {
     pub(crate) fn copy<'a, O>(
         &mut self,
         row_idx: u32,
@@ -372,6 +518,54 @@ impl Tensor<'static, Mut, F32, Host> {
         Ok(())
     }
 
+    pub(crate) fn mul_elementwise<'a, O>(
+        &mut self,
+        a: &Tensor<'a, O, F32, Host>,
+        b: &Tensor<'a, O, F32, Host>,
+        alpha: f32,
+    ) -> Result<(), crate::Error>
+    where
+        O: Ownership + StorageType<'a, Host>,
+    {
+        todo!()
+        /*
+        if self.layout.is_row_major != other.layout.is_row_major {
+            return Err(crate::Error::operation_not_supported(
+                "`add` with mismatched tensor layout majority",
+            ));
+        }
+        validate_shape(
+            other.layout.nrow,
+            other.layout.ncol,
+            self.layout.nrow,
+            self.layout.ncol,
+        )?;
+
+        let is_other_packed = other.layout.line_elems() == other.layout.stride;
+        let y = self.data.as_mut_ptr() as *mut f32;
+        let x = unsafe { other.data.as_ptr().byte_add(other.layout.offset) } as *const f32;
+
+        if is_other_packed {
+            let n = self.layout.nrow as usize * self.layout.ncol as usize;
+            unsafe { kernel::add_n_n(y as *mut f32, x as *const f32, n) };
+        } else {
+            let mut y = y;
+            let mut x = x;
+
+            let n_lines = self.layout.n_lines();
+            let line_elems = self.layout.line_elems() as usize;
+
+            for _ in 0..n_lines {
+                unsafe { kernel::add_n_n(y, x, line_elems) };
+                y = unsafe { y.add(self.layout.stride as usize) };
+                x = unsafe { x.add(other.layout.stride as usize) };
+            }
+        }
+
+        Ok(())
+        */
+    }
+
     pub(crate) fn rms_norm<'a, O>(
         &mut self,
         weight: &Tensor<'a, O, F32, Host>,
@@ -494,7 +688,7 @@ impl Tensor<'static, Mut, F32, Host> {
     }
 }
 
-impl<'a, E> Tensor<'a, Ref, E, Host>
+impl<'a, E> Tensor<'a, RefConst, E, Host>
 where
     E: ElemType,
 {
@@ -556,7 +750,7 @@ fn validate_shape(
 }
 
 #[cfg(test)]
-impl Tensor<'_, Ref, F32, Host> {
+impl Tensor<'_, RefConst, F32, Host> {
     pub(crate) fn assert(&self, answer: &[f32]) -> () {
         let size = self.layout.nrow as usize * self.layout.ncol as usize;
         assert_eq!(size, answer.len(), "invalid test data");
@@ -618,13 +812,13 @@ mod tests {
     #[test]
     fn case01_copy_subtensor() {
         let src_mem = mmap_mut_from_f32(&[1.0, 2.0, 3.0, 2.0, 3.0, 4.0]);
-        let src = Tensor::<Mut, F32, Host>::new(src_mem, 2, 3, true)
+        let src = Tensor::<OwnMut, F32, Host>::new(src_mem, 2, 3, true)
             .expect("creating source tensor should succeed")
             .to_readonly();
 
         let dst_mem =
             mmap_mut_from_f32(&[9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0]);
-        let mut dst = Tensor::<Mut, F32, Host>::new(dst_mem, 3, 4, true)
+        let mut dst = Tensor::<OwnMut, F32, Host>::new(dst_mem, 3, 4, true)
             .expect("creating destination tensor should succeed");
 
         dst.copy(1, 1, &src)
@@ -637,11 +831,11 @@ mod tests {
     #[test]
     fn case02_cast_bf16_to_f32() {
         let src_mem = mmap_mut_from_bf16(&[0x3f80, 0x4000, 0x4040, 0x4080]);
-        let src = Tensor::<Mut, BF16, Host>::new(src_mem, 2, 2, true)
+        let src = Tensor::<OwnMut, BF16, Host>::new(src_mem, 2, 2, true)
             .expect("creating bf16 source tensor should succeed");
 
         let dst_mem = mmap_mut_from_f32(&[0.0, 0.0, 0.0, 0.0]);
-        let mut dst = Tensor::<Mut, F32, Host>::new(dst_mem, 2, 2, true)
+        let mut dst = Tensor::<OwnMut, F32, Host>::new(dst_mem, 2, 2, true)
             .expect("creating f32 destination tensor should succeed");
 
         dst.cast(&src)
@@ -653,11 +847,11 @@ mod tests {
     #[test]
     fn case03_rms_norm() {
         let x_mem = mmap_mut_from_f32(&[3.0, 4.0, 0.0, 5.0]);
-        let mut x = Tensor::<Mut, F32, Host>::new(x_mem, 2, 2, true)
+        let mut x = Tensor::<OwnMut, F32, Host>::new(x_mem, 2, 2, true)
             .expect("creating input tensor for rms_norm should succeed");
 
         let w_mem = mmap_mut_from_f32(&[2.0, 0.5]);
-        let w = Tensor::<Mut, F32, Host>::new(w_mem, 1, 2, true)
+        let w = Tensor::<OwnMut, F32, Host>::new(w_mem, 1, 2, true)
             .expect("creating rms_norm weight tensor should succeed")
             .to_readonly();
 

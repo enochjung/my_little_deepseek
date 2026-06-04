@@ -30,3 +30,11 @@ impl<'a> Storage for &'a Mmap {
         (*self).as_ptr()
     }
 }
+impl<'a> Storage for &'a mut MmapMut {
+    fn len(&self) -> usize {
+        (*self).len()
+    }
+    fn as_ptr(&self) -> *const () {
+        (*self).as_ptr()
+    }
+}

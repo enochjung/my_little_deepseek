@@ -5,10 +5,10 @@ use crate::tensor::*;
 
 pub(crate) struct RoPE<E: ElemType, L: Location>
 where
-    Mut: StorageType<'static, L>,
+    OwnMut: StorageType<'static, L>,
 {
     head_size: u32,
-    tensor_cs: Tensor<'static, Mut, E, L>,
+    tensor_cs: Tensor<'static, OwnMut, E, L>,
 }
 
 impl RoPE<F32, Host> {
@@ -34,7 +34,7 @@ impl RoPE<F32, Host> {
         // Create a mutable tensor backed by the provided MmapMut, fill it with
         // RoPE cos/sin values using the tensor helper, then convert it to an
         // owned (readonly) tensor for safe storage.
-        let mut tensor_cs = Tensor::<Mut, F32, Host>::new(data, 1, head_size, true)?;
+        let mut tensor_cs = Tensor::<OwnMut, F32, Host>::new(data, 1, head_size, true)?;
         tensor_cs.rope_cs(token_index, rope_theta, head_size)?;
 
         Ok(Self {
@@ -46,14 +46,18 @@ impl RoPE<F32, Host> {
     // tmp: (1 * head_dim/2)
     pub(crate) fn run_rope(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
-        tmp: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<'static, OwnMut, F32, Host>,
+        tmp: &mut Tensor<'static, OwnMut, F32, Host>,
     ) -> Result<(), crate::Error> {
         let n = self.head_size;
         let half = n / 2;
 
         let tensor_cos = self.tensor_cs.slice(0..1, 0..half);
         let tensor_sin = self.tensor_cs.slice(0..1, half..n);
+
+        let (mut x0, mut x1) = x.slice_mut(0..1, 0..self.head_size).split_col(half)?;
+        tmp.copy(0, 0, &x0)?;
+        //x0.mul_elementwise(&x1, &tensor_sin, -1.0);
 
         // x_0 = x[0..half]
         // x_1 = x[half..head_size]

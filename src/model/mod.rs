@@ -131,7 +131,7 @@ impl Model {
 
     pub(crate) fn decode(&self, token: u32, kv_cache: &mut KVCache) -> Result<u32, crate::Error> {
         let tmp_storage = MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?;
-        let mut residual = Tensor::<Mut, F32, Host>::new(tmp_storage, 1, self.hidden_size, true)?;
+        let mut residual = Tensor::<OwnMut, F32, Host>::new(tmp_storage, 1, self.hidden_size, true)?;
 
         let mut x = self.build_embedding_tensor(&[token])?;
 
@@ -152,11 +152,11 @@ impl Model {
     fn build_embedding_tensor(
         &self,
         token_ids: &[u32],
-    ) -> Result<Tensor<'static, Mut, F32, Host>, crate::Error> {
+    ) -> Result<Tensor<'static, OwnMut, F32, Host>, crate::Error> {
         let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
         let storage = MmapMut::new(size)?;
         let mut tensor =
-            Tensor::<Mut, F32, Host>::new(storage, token_ids.len() as u32, self.hidden_size, true)?;
+            Tensor::<OwnMut, F32, Host>::new(storage, token_ids.len() as u32, self.hidden_size, true)?;
 
         for i in 0..token_ids.len() {
             let token_id = token_ids[i];
@@ -169,7 +169,7 @@ impl Model {
 
     fn run_attention_block(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<'static, OwnMut, F32, Host>,
         kv_cache: &mut KVCache,
         layer: usize,
     ) -> Result<(), crate::Error> {
@@ -178,7 +178,7 @@ impl Model {
 
     fn run_mlp_block(
         &self,
-        x: &mut Tensor<'static, Mut, F32, Host>,
+        x: &mut Tensor<'static, OwnMut, F32, Host>,
         layer: usize,
     ) -> Result<(), crate::Error> {
         todo!()
@@ -205,7 +205,7 @@ impl Model {
         */
     }
 
-    fn run_output_block(&self, x: Tensor<'static, Mut, F32, Host>) -> Result<u32, crate::Error> {
+    fn run_output_block(&self, x: Tensor<'static, OwnMut, F32, Host>) -> Result<u32, crate::Error> {
         todo!()
         /*
         // [Shape] final_x: [1, 1536]
@@ -231,14 +231,14 @@ impl Model {
 fn build_tensor_f32(
     storage_bf16: &Mmap,
     weight_info_bf16: &WeightInfo,
-) -> Result<Tensor<'static, Own, F32, Host>, crate::Error> {
+) -> Result<Tensor<'static, OwnConst, F32, Host>, crate::Error> {
     let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
         [] => return Err(crate::Error::broken_data(0)),
         [ncol] => (1, *ncol),
         [nrow, ncol] => (*nrow, *ncol),
         _ => return Err(crate::Error::broken_data(0)),
     };
-    let tensor_bf16 = Tensor::<Ref, BF16, Host>::new(
+    let tensor_bf16 = Tensor::<RefConst, BF16, Host>::new(
         storage_bf16,
         weight_info_bf16.offset.start,
         nrow,
@@ -247,7 +247,7 @@ fn build_tensor_f32(
     )?;
 
     let storage_f32 = MmapMut::new(nrow as usize * ncol as usize * F32::BYTES)?;
-    let mut tensor_f32 = Tensor::<Mut, F32, Host>::new(storage_f32, nrow, ncol, true)?;
+    let mut tensor_f32 = Tensor::<OwnMut, F32, Host>::new(storage_f32, nrow, ncol, true)?;
     tensor_f32.cast(&tensor_bf16)?;
     Ok(tensor_f32.to_readonly())
 }
@@ -416,7 +416,7 @@ mod tests {
         Model::new(conf).expect("initializing model should succeed")
     }
 
-    fn assert_embedding_values<'t>(tensor: Tensor<'t, Ref, F32, Host>, expected_rows: &[[f32; 5]]) {
+    fn assert_embedding_values<'t>(tensor: Tensor<'t, RefConst, F32, Host>, expected_rows: &[[f32; 5]]) {
         let slice_tensor = tensor.slice(0..4, 0..5);
         let vec = expected_rows
             .iter()
