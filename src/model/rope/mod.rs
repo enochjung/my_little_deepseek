@@ -1,13 +1,14 @@
 use crate::storage::MmapMut;
 use crate::tensor::*;
 
+// https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py#L116
+
 pub(crate) struct RoPE<E: ElemType, L: Location>
 where
     Mut: StorageType<'static, L>,
-    //Ref: StorageType<'static, L>,
 {
+    head_size: u32,
     tensor_cs: Tensor<'static, Mut, E, L>,
-    //tensor_cos: Tensor<'static, Ref, E, L>,
 }
 
 impl RoPE<F32, Host> {
@@ -36,11 +37,9 @@ impl RoPE<F32, Host> {
         let mut tensor_cs = Tensor::<Mut, F32, Host>::new(data, 1, head_size, true)?;
         tensor_cs.rope_cs(token_index, rope_theta, head_size)?;
 
-        let tensor_cos = tensor_cs.slice(0..1, 0..head_size / 2);
-
         Ok(Self {
+            head_size,
             tensor_cs,
-            //tensor_cos,
         })
     }
 
@@ -50,7 +49,14 @@ impl RoPE<F32, Host> {
         x: &mut Tensor<'static, Mut, F32, Host>,
         tmp: &mut Tensor<'static, Mut, F32, Host>,
     ) -> Result<(), crate::Error> {
-        // https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py#L116
+        let n = self.head_size;
+        let half = n / 2;
+
+        let tensor_cos = self.tensor_cs.slice(0..1, 0..half);
+        let tensor_sin = self.tensor_cs.slice(0..1, half..n);
+
+        // x_0 = x[0..half]
+        // x_1 = x[half..head_size]
 
         // clone x_0 to tmp.
         // x_0 = -1 * x_1 ** sin.
