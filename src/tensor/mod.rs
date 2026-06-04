@@ -79,7 +79,7 @@ impl StorageType<'static, Host> for Mut {
 impl<'a> StorageType<'a, Host> for Ref {
     type Memory = &'a Mmap;
 }
-fn ref_mem_from_mmap<'s>(mem: &'s Mmap) -> <Ref as StorageType<'s, Host>>::Memory {
+fn ref_mem_from_mmap<'a>(mem: &'a Mmap) -> <Ref as StorageType<'a, Host>>::Memory {
     mem
 }
 
@@ -126,14 +126,7 @@ impl<E> Tensor<'static, Own, E, Host>
 where
     E: ElemType,
 {
-    pub(crate) fn slice<'s>(
-        &'s self,
-        rows: Range<u32>,
-        cols: Range<u32>,
-    ) -> Tensor<'s, Ref, E, Host>
-    where
-        Ref: StorageType<'s, Host>,
-    {
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<Ref, E, Host> {
         let data = ref_mem_from_mmap(&self.data);
         Tensor {
             data,
@@ -147,11 +140,7 @@ impl<E> Tensor<'static, Mut, E, Host>
 where
     E: ElemType,
 {
-    pub(crate) fn slice<'s>(
-        &'s self,
-        rows: Range<u32>,
-        cols: Range<u32>,
-    ) -> Tensor<'s, Ref, E, Host> {
+    pub(crate) fn slice(&self, rows: Range<u32>, cols: Range<u32>) -> Tensor<Ref, E, Host> {
         let data = ref_mem_from_mmap(self.data.as_const_mmap());
         Tensor {
             data,
@@ -244,14 +233,14 @@ where
     }
 }
 impl Tensor<'static, Mut, F32, Host> {
-    pub(crate) fn copy<'b, O>(
+    pub(crate) fn copy<'a, O>(
         &mut self,
         row_idx: u32,
         col_idx: u32,
-        other: &Tensor<'b, O, F32, Host>,
+        other: &Tensor<'a, O, F32, Host>,
     ) -> Result<(), crate::Error>
     where
-        O: Ownership + StorageType<'b, Host>,
+        O: Ownership + StorageType<'a, Host>,
     {
         if self.layout.is_row_major != other.layout.is_row_major {
             return Err(crate::Error::operation_not_supported(
@@ -287,12 +276,12 @@ impl Tensor<'static, Mut, F32, Host> {
         Ok(())
     }
 
-    pub(crate) fn cast<'b, O>(
+    pub(crate) fn cast<'a, O>(
         &mut self,
-        other: &Tensor<'b, O, BF16, Host>,
+        other: &Tensor<'a, O, BF16, Host>,
     ) -> Result<(), crate::Error>
     where
-        O: Ownership + StorageType<'b, Host>,
+        O: Ownership + StorageType<'a, Host>,
     {
         validate_shape(
             other.layout.nrow,
@@ -334,19 +323,18 @@ impl Tensor<'static, Mut, F32, Host> {
         let k = token_index as f32;
         let d = head_size as f32;
 
-        // Fill first half with cos factors, second half with sin factors.
         unsafe { kernel::rope_cos_n(ptr, n, k, rope_theta, d) };
         unsafe { kernel::rope_sin_n(ptr.add(n), n, k, rope_theta, d) };
 
         Ok(())
     }
 
-    pub(crate) fn add<'b, O>(
+    pub(crate) fn add<'a, O>(
         &mut self,
-        other: &Tensor<'b, O, F32, Host>,
+        other: &Tensor<'a, O, F32, Host>,
     ) -> Result<(), crate::Error>
     where
-        O: Ownership + StorageType<'b, Host>,
+        O: Ownership + StorageType<'a, Host>,
     {
         if self.layout.is_row_major != other.layout.is_row_major {
             return Err(crate::Error::operation_not_supported(
@@ -384,13 +372,13 @@ impl Tensor<'static, Mut, F32, Host> {
         Ok(())
     }
 
-    pub(crate) fn rms_norm<'b, O>(
+    pub(crate) fn rms_norm<'a, O>(
         &mut self,
-        weight: &Tensor<'b, O, F32, Host>,
+        weight: &Tensor<'a, O, F32, Host>,
         epsilon: f32,
     ) -> Result<(), crate::Error>
     where
-        O: Ownership + StorageType<'b, Host>,
+        O: Ownership + StorageType<'a, Host>,
     {
         if self.layout.is_row_major != true {
             return Err(crate::Error::operation_not_supported(
@@ -447,14 +435,14 @@ impl Tensor<'static, Mut, F32, Host> {
     // B.nrow must be equal to A.ncol
     // shape of C must be (1 * B.ncol)
     // c is expanded in calculation
-    pub(crate) fn muladd_broadcast<'b, O>(
+    pub(crate) fn muladd_broadcast<'a, O>(
         &mut self,
-        #[allow(non_snake_case)] A: &Tensor<'b, O, F32, Host>,
-        #[allow(non_snake_case)] B: &Tensor<'b, O, F32, Host>,
-        c: &Tensor<'b, O, F32, Host>,
+        #[allow(non_snake_case)] A: &Tensor<'a, O, F32, Host>,
+        #[allow(non_snake_case)] B: &Tensor<'a, O, F32, Host>,
+        c: &Tensor<'a, O, F32, Host>,
     ) -> Result<(), crate::Error>
     where
-        O: Ownership + StorageType<'b, Host>,
+        O: Ownership + StorageType<'a, Host>,
     {
         validate_shape(
             self.layout.nrow,
