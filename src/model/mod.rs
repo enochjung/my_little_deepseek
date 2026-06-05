@@ -11,6 +11,7 @@ use crate::tensor::*;
 use attention::Attention;
 use embedding::Embedding;
 use rms_normalizer::RMSNormalizer;
+use rope::RoPE;
 use std::collections::HashMap;
 use std::ops::Range;
 use tokenizer::Tokenizer;
@@ -118,18 +119,22 @@ impl Model {
     pub(crate) fn prefill(
         &self,
         tokens: &[u32],
-        kv_cache: &mut KVCache,
+        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
     ) -> Result<u32, crate::Error> {
         // TODO: impl real prefill
 
         let mut next_token = 0;
         for &token in tokens {
-            next_token = self.decode(token, kv_cache)?;
+            next_token = self.decode(token, kv_caches)?;
         }
         Ok(next_token)
     }
 
-    pub(crate) fn decode(&self, token: u32, kv_cache: &mut KVCache) -> Result<u32, crate::Error> {
+    pub(crate) fn decode(
+        &self,
+        token: u32,
+        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
+    ) -> Result<u32, crate::Error> {
         let mut residual = Tensor::<F32, MmapMut>::new(
             MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?,
             0,
@@ -143,7 +148,7 @@ impl Model {
 
         for layer in 0..self.num_hidden_layers {
             residual.copy(&x)?;
-            self.run_attention_block(&mut x, kv_cache, layer)?;
+            self.run_attention_block(&mut x, kv_caches, layer)?;
             x.add(&residual)?;
 
             residual.copy(&x)?;
@@ -185,10 +190,18 @@ impl Model {
     fn run_attention_block(
         &self,
         x: &mut Tensor<F32, MmapMut>,
-        kv_cache: &mut KVCache,
+        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
         layer: usize,
     ) -> Result<(), crate::Error> {
-        self.attentions[layer].run_attention(x, kv_cache, self.rms_norm_epsilon)
+        self.attentions[layer].run_attention(
+            x,
+            &mut kv_caches[layer],
+            self.num_attention_heads,
+            self.num_key_value_heads,
+            self.rms_norm_epsilon,
+            self.head_size,
+            self.rope_theta,
+        )
     }
 
     fn run_mlp_block(

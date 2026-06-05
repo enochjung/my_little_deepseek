@@ -2,6 +2,8 @@ mod kv_cache;
 mod special_token;
 
 use crate::Model;
+use crate::storage::MmapMut;
+use crate::tensor::F32;
 pub(crate) use kv_cache::KVCache;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -10,7 +12,7 @@ use std::thread::JoinHandle;
 pub struct Session<'a> {
     model: &'a Model,
     tokens: Vec<u32>,
-    kv_cache: KVCache,
+    kv_caches: Vec<KVCache<F32, MmapMut>>,
 }
 
 impl<'a> Session<'a> {
@@ -21,24 +23,26 @@ impl<'a> Session<'a> {
         // Build the prompt tokens that will be prefed into the worker.
         let model = self.model;
         let mut tokens = self.tokens;
-        let kv_cache = self.kv_cache;
+        let kv_caches = self.kv_caches;
 
         tokens.push(special_token::USER);
         tokens.append(&mut self.model.tokenize(user_input)?);
         tokens.push(special_token::ASSISTANT);
         tokens.push(special_token::THINK_START);
 
-        Ok(SessionTask::new(model, tokens, kv_cache))
+        Ok(SessionTask::new(model, tokens, kv_caches))
     }
 
     pub(crate) fn new(model: &'a Model) -> Self {
         let tokens = vec![special_token::BEGIN_OF_SENTENCE; 1];
-        let kv_cache = KVCache::new();
+        let kv_caches = (0..model.num_hidden_layers)
+            .map(|_| KVCache::new())
+            .collect();
 
         Self {
             model,
             tokens,
-            kv_cache,
+            kv_caches,
         }
     }
 }
@@ -46,21 +50,21 @@ impl<'a> Session<'a> {
 pub struct SessionTask<'a> {
     model: &'a Model,
     tokens: Vec<u32>,
-    worker: Option<JoinHandle<Result<KVCache, crate::Error>>>,
+    worker: Option<JoinHandle<Result<Vec<KVCache<F32, MmapMut>>, crate::Error>>>,
     abort_flag: Arc<AtomicBool>,
     token_rx: mpsc::Receiver<u32>,
 }
 
 impl<'a> SessionTask<'a> {
-    fn new(model: &'a Model, tokens: Vec<u32>, kv_cache: KVCache) -> Self {
-        let prefill_start = kv_cache.len().min(tokens.len());
+    fn new(model: &'a Model, tokens: Vec<u32>, kv_caches: Vec<KVCache<F32, MmapMut>>) -> Self {
+        let prefill_start = kv_caches[0].len().min(tokens.len());
         let prefill_tokens = tokens[prefill_start..].to_vec();
         let abort_flag = Arc::new(AtomicBool::new(false));
         let (token_tx, token_rx) = mpsc::channel();
         let worker = Worker::spawn(
             model,
             prefill_tokens,
-            kv_cache,
+            kv_caches,
             Arc::clone(&abort_flag),
             token_tx,
         );
@@ -87,7 +91,7 @@ impl<'a> SessionTask<'a> {
         }
         let tokens = std::mem::take(&mut self.tokens);
 
-        let kv_cache = self
+        let kv_caches = self
             .worker
             .take()
             .unwrap()
@@ -97,7 +101,7 @@ impl<'a> SessionTask<'a> {
         Ok(Session {
             model: self.model,
             tokens,
-            kv_cache,
+            kv_caches,
         })
     }
 
@@ -139,7 +143,7 @@ struct Worker {
     // SAFETY: the worker is joined before the owning SessionTask is dropped.
     model_ptr: usize,
     prefill_tokens: Vec<u32>,
-    kv_cache: KVCache,
+    kv_caches: Vec<KVCache<F32, MmapMut>>,
     abort_flag: Arc<AtomicBool>,
     transmitter: mpsc::Sender<u32>,
 }
@@ -148,14 +152,14 @@ impl Worker {
     fn spawn(
         model: &Model,
         prefill_tokens: Vec<u32>,
-        kv_cache: KVCache,
+        kv_caches: Vec<KVCache<F32, MmapMut>>,
         abort_flag: Arc<AtomicBool>,
         transmitter: mpsc::Sender<u32>,
-    ) -> JoinHandle<Result<KVCache, crate::Error>> {
+    ) -> JoinHandle<Result<Vec<KVCache<F32, MmapMut>>, crate::Error>> {
         let worker = Self {
             model_ptr: model as *const Model as usize,
             prefill_tokens,
-            kv_cache,
+            kv_caches,
             abort_flag,
             transmitter,
         };
@@ -163,10 +167,10 @@ impl Worker {
         std::thread::spawn(move || worker.run())
     }
 
-    fn run(self) -> Result<KVCache, crate::Error> {
+    fn run(self) -> Result<Vec<KVCache<F32, MmapMut>>, crate::Error> {
         let model = unsafe { &*(self.model_ptr as *const Model) };
         let prefill_tokens = self.prefill_tokens;
-        let mut kv_cache = self.kv_cache;
+        let mut kv_cache = self.kv_caches;
         let abort_flag = self.abort_flag;
         let transmitter = self.transmitter;
 

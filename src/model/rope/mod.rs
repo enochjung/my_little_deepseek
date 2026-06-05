@@ -8,14 +8,17 @@ pub(crate) struct RoPE<E: ElemType, MO: Mutable + Owned> {
     tensor_cs: Tensor<E, MO>,
 }
 
-impl RoPE<F32, MmapMut> {
+impl<MO: Mutable + Owned> RoPE<F32, MO> {
     pub(crate) fn new(
-        data: MmapMut,
+        cs_storage: MO,
         token_index: u32,
         rope_theta: f32,
         head_size: u32,
-    ) -> Result<Self, crate::Error> {
-        let mut tensor_cs = Tensor::<F32, _>::new(data, 0, 1, head_size, head_size, true)?;
+    ) -> Result<Self, crate::Error>
+    where
+        MO: Storage<Loc = Host>,
+    {
+        let mut tensor_cs = Tensor::<F32, _>::new(cs_storage, 0, 1, head_size, head_size, true)?;
         tensor_cs.rope_cs(token_index, rope_theta, head_size)?;
 
         Ok(Self {
@@ -25,11 +28,16 @@ impl RoPE<F32, MmapMut> {
     }
 
     // tmp: (1 * head_dim)
-    pub(crate) fn run_rope(
+    pub(crate) fn run_rope<M0: Mutable, M1: Mutable>(
         &self,
-        x: &mut Tensor<F32, MmapMut>,
-        tmp: &mut Tensor<F32, MmapMut>,
-    ) -> Result<(), crate::Error> {
+        x: &mut Tensor<F32, M0>,
+        tmp: &mut Tensor<F32, M1>,
+    ) -> Result<(), crate::Error>
+    where
+        MO: Storage<Loc = Host>,
+        M0: Storage<Loc = Host>,
+        M1: Storage<Loc = Host>,
+    {
         let n = self.head_size;
         let half = n / 2;
 
@@ -50,7 +58,7 @@ impl RoPE<F32, MmapMut> {
         Ok(())
     }
 
-    pub(crate) fn take_storage(self) -> MmapMut {
+    pub(crate) fn take_storage(self) -> MO {
         self.tensor_cs.take_storage()
     }
 }

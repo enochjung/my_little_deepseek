@@ -57,6 +57,8 @@ pub(crate) struct MmapMut {
     len: usize,
 }
 
+unsafe impl Send for MmapMut {}
+
 impl MmapMut {
     pub(crate) fn new(len: usize) -> Result<Self, crate::Error> {
         let ptr = new_mmap(-1, len, false).map_err(crate::Error::io)?;

@@ -454,6 +454,10 @@ impl<MH: Mutable<Loc = Host>> Tensor<F32, MH> {
         Ok(())
     }
 
+    pub(crate) fn softmax(&mut self, alpha: f32) -> Result<(), crate::Error> {
+        todo!()
+    }
+
     /*
     pub(crate) fn silu(&mut self) -> Result<(), crate::Error> {
         todo!()
@@ -482,6 +486,55 @@ impl<MH: Mutable<Loc = Host>> Tensor<F32, MH> {
         Ok(())
     }
      */
+
+    // self = AB
+    // shape of self must be (A.nrow * B.ncol)
+    // B.nrow must be equal to A.ncol
+    pub(crate) fn mul<S0: Storage<Loc = Host>, S1: Storage<Loc = Host>>(
+        &mut self,
+        #[allow(non_snake_case)] A: &Tensor<F32, S0>,
+        #[allow(non_snake_case)] B: &Tensor<F32, S1>,
+    ) -> Result<(), crate::Error> {
+        validate_shape(
+            self.layout.nrow,
+            self.layout.ncol,
+            A.layout.nrow,
+            B.layout.ncol,
+        )?;
+        validate_shape(
+            A.layout.nrow,
+            A.layout.ncol,
+            self.layout.ncol,
+            B.layout.nrow,
+        )?;
+
+        let m = A.layout.nrow as usize;
+        let k = A.layout.ncol as usize;
+        let n = B.layout.ncol as usize;
+
+        let dst = unsafe { self.storage.as_mut_ptr().byte_add(self.layout.offset) } as *mut f32;
+        let a = unsafe { A.storage.as_ptr().byte_add(A.layout.offset) } as *const f32;
+        let b = unsafe { B.storage.as_ptr().byte_add(B.layout.offset) } as *const f32;
+
+        unsafe {
+            kernel::mul_mk_kn(
+                dst,
+                self.layout.is_row_major,
+                self.layout.stride as usize,
+                a,
+                A.layout.is_row_major,
+                A.layout.stride as usize,
+                b,
+                B.layout.is_row_major,
+                B.layout.stride as usize,
+                m,
+                k,
+                n,
+            )
+        };
+
+        Ok(())
+    }
 
     // self = AB + c
     // shape of self must be (A.nrow * B.ncol)
