@@ -488,3 +488,60 @@ pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n_avx512(
         }
     }
 }
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn mul_rmn_rmk_ckn_r1n_avx512(
+    d: *mut f32,
+    ldd: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
+    c: *const f32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bj in (0..n).step_by(BLOCK_SIZE) {
+            for bk in (0..k).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+
+                for i in bi..i_end {
+                    for j in bj..j_end {
+                        let mut sum_vec = _mm512_setzero_ps();
+                        let mut k_idx = bk;
+
+                        while k_idx + 15 < k_end {
+                            let a_vec = unsafe { _mm512_loadu_ps(a.add(i * lda as usize + k_idx)) };
+                            let b_vec = unsafe { _mm512_loadu_ps(b.add(k_idx + j * ldb as usize)) };
+                            sum_vec = _mm512_fmadd_ps(a_vec, b_vec, sum_vec);
+                            k_idx += 16;
+                        }
+
+                        let mut sum = if bk == 0 {
+                            unsafe { *c.add(j) }
+                        } else {
+                            unsafe { *d.add(i * ldd as usize + j) }
+                        };
+
+                        sum += _mm512_reduce_add_ps(sum_vec);
+
+                        while k_idx < k_end {
+                            unsafe {
+                                sum += (*a.add(i * lda as usize + k_idx))
+                                    * (*b.add(k_idx + j * ldb as usize))
+                            };
+                            k_idx += 1;
+                        }
+
+                        unsafe { *d.add(i * ldd as usize + j) = sum };
+                    }
+                }
+            }
+        }
+    }
+}

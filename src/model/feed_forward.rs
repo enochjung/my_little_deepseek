@@ -60,14 +60,14 @@ where
 
         self.rms_norm.execute(x)?;
 
-        gate.mul(&x, &self.gate)?;
-        up.mul(&x, &self.up)?;
+        gate.mul_bt(&x, &self.gate.transpose())?;
+        up.mul_bt(&x, &self.up.transpose())?;
 
         gate.silu();
 
         activated.mul_elementwise(&gate, &up, 1.0)?;
 
-        x.mul(&activated, &self.down)?;
+        x.mul_bt(&activated, &self.down.transpose())?;
 
         Ok(())
     }

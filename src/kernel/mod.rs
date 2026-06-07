@@ -470,6 +470,77 @@ pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n(
     }
 }
 
+/// Computes `D = A * B + c` with `c` broadcasted along m-dimension, but `B` is column-major.
+///
+/// # Parameters
+///
+/// - `d`: `D` base pointer, shape `(m, n)`.
+/// - `ldd`: `D` leading dimension.
+/// - `a`: `A` base pointer, shape `(m, k)`.
+/// - `lda`: `A` leading dimension.
+/// - `b`: `B` base pointer, shape `(k, n)`.
+/// - `ldb`: `B` leading dimension.
+/// - `c`: `c` base pointer, shape `(1, n)`.
+/// - `m`: shape `m`
+/// - `k`: shape `k`.
+/// - `n`: shape `n`.
+///
+/// # Safety
+///
+/// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
+/// - `a`, `b`, `c`, and `d` do not overlap.
+/// - `a`, `b`, `c`, and `d` are 4-byte aligned.
+pub(crate) unsafe fn mul_rmn_rmk_ckn_r1n(
+    d: *mut f32,
+    ldd: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
+    c: *const f32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe {
+                x86_64::mul_rmn_rmk_ckn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
+            };
+        }
+    }
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bj in (0..n).step_by(BLOCK_SIZE) {
+            for bk in (0..k).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+
+                for i in bi..i_end {
+                    for j in bj..j_end {
+                        let mut sum = if bk == 0 {
+                            unsafe { *c.add(j) }
+                        } else {
+                            unsafe { *d.add(i * ldd as usize + j) }
+                        };
+
+                        for k_idx in bk..k_end {
+                            unsafe {
+                                sum += (*a.add(i * lda as usize + k_idx))
+                                    * (*b.add(k_idx + j * ldb as usize))
+                            };
+                        }
+
+                        unsafe { *d.add(i * ldd as usize + j) = sum };
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
