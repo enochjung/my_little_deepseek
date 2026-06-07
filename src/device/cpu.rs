@@ -189,7 +189,7 @@ impl DeviceOps<F32> for Cpu {
             }
         }
     }
-    unsafe fn mul_mk_kn<
+    unsafe fn mul_mn_mk_kn<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -210,23 +210,20 @@ impl DeviceOps<F32> for Cpu {
         let b = unsafe { src1.as_ptr().byte_add(src1_layout.offset) } as *const f32;
 
         unsafe {
-            kernel::mul_mk_kn(
+            kernel::mul_rmn_rmk_rkn(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                true,
-                src1_layout.stride as usize,
+                src1_layout.stride,
                 m,
                 k,
                 n,
             )
         };
     }
-    unsafe fn mul_mk_knt<
+    unsafe fn mul_mn_mk_knt<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -247,23 +244,20 @@ impl DeviceOps<F32> for Cpu {
         let b = unsafe { src1.as_ptr().byte_add(src1_layout_t.offset) } as *const f32;
 
         unsafe {
-            kernel::mul_mk_kn(
+            kernel::mul_rmn_rmk_ckn(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                false,
-                src1_layout_t.stride as usize,
+                src1_layout_t.stride,
                 m,
                 k,
                 n,
             )
         };
     }
-    unsafe fn muladd_mk_kn_1n<
+    unsafe fn mul_mn_mk_kn_1n<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -288,16 +282,13 @@ impl DeviceOps<F32> for Cpu {
         let c = unsafe { src2.as_ptr().byte_add(src2_layout.offset) } as *const f32;
 
         unsafe {
-            kernel::muladd_mk_kn_1n(
+            kernel::mul_rmn_rmk_rkn_r1n(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                true,
-                src1_layout.stride as usize,
+                src1_layout.stride,
                 c,
                 m,
                 k,

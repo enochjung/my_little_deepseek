@@ -93,7 +93,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1_layout: &Layout,
         alpha: f32,
     ) -> ();
-    unsafe fn mul_mk_kn<
+    unsafe fn mul_mn_mk_kn<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -105,7 +105,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1: &D1,
         src1_layout: &Layout,
     ) -> ();
-    unsafe fn mul_mk_knt<
+    unsafe fn mul_mn_mk_knt<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -117,7 +117,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1: &D1,
         src1_layout_t: &Layout,
     ) -> ();
-    unsafe fn muladd_mk_kn_1n<
+    unsafe fn mul_mn_mk_kn_1n<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,

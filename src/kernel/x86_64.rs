@@ -310,83 +310,181 @@ pub(crate) unsafe fn rope_sin_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32
     }
 }
 
+const BLOCK_SIZE: usize = 64;
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn muladd_rmk_rkn_r1n_avx512(
-    d: *mut f32,
-    ldd: usize,
+pub(crate) unsafe fn mul_rmn_rmk_rkn_avx512(
+    c: *mut f32,
+    ldc: u32,
     a: *const f32,
-    lda: usize,
+    lda: u32,
     b: *const f32,
-    ldb: usize,
+    ldb: u32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    for i in 0..m {
+        for j in 0..n {
+            unsafe { *c.add(i * ldc as usize + j) = 0.0 };
+        }
+    }
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bk in (0..k).step_by(BLOCK_SIZE) {
+            for bj in (0..n).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+
+                for i in bi..i_end {
+                    for k_idx in bk..k_end {
+                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
+                        let a_vec = _mm512_set1_ps(a_val);
+
+                        let mut j = bj;
+                        while j + 15 < j_end {
+                            let c_ptr = unsafe { c.add(i * ldc as usize + j) };
+                            let b_ptr = unsafe { b.add(k_idx * ldb as usize + j) };
+
+                            let c_vec = unsafe { _mm512_loadu_ps(c_ptr) };
+                            let b_vec = unsafe { _mm512_loadu_ps(b_ptr) };
+
+                            let out = _mm512_fmadd_ps(a_vec, b_vec, c_vec);
+                            unsafe { _mm512_storeu_ps(c_ptr, out) };
+
+                            j += 16;
+                        }
+
+                        while j < j_end {
+                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
+                            unsafe { *c.add(i * ldc as usize + j) += a_val * b_val };
+                            j += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn mul_rmn_rmk_ckn_avx512(
+    c: *mut f32,
+    ldc: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bj in (0..n).step_by(BLOCK_SIZE) {
+            for bk in (0..k).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+
+                for i in bi..i_end {
+                    for j in bj..j_end {
+                        let mut sum_vec = _mm512_setzero_ps();
+                        let mut k_idx = bk;
+
+                        while k_idx + 15 < k_end {
+                            let a_vec = unsafe { _mm512_loadu_ps(a.add(i * lda as usize + k_idx)) };
+                            let b_vec = unsafe { _mm512_loadu_ps(b.add(k_idx + j * ldb as usize)) };
+                            sum_vec = _mm512_fmadd_ps(a_vec, b_vec, sum_vec);
+                            k_idx += 16;
+                        }
+
+                        let mut sum = if bk == 0 {
+                            0.0
+                        } else {
+                            unsafe { *c.add(i * ldc as usize + j) }
+                        };
+                        sum += _mm512_reduce_add_ps(sum_vec);
+
+                        while k_idx < k_end {
+                            unsafe {
+                                sum += (*a.add(i * lda as usize + k_idx))
+                                    * (*b.add(k_idx + j * ldb as usize))
+                            };
+                            k_idx += 1;
+                        }
+
+                        unsafe { *c.add(i * ldc as usize + j) = sum };
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n_avx512(
+    d: *mut f32,
+    ldd: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
     c: *const f32,
     m: usize,
     k: usize,
     n: usize,
 ) -> () {
-    todo!()
-    /*
-    // Copy `c` into `buf`.
-    let mut c_src = c as *const f32;
-    let mut c_dst = buf;
-    let c_src_vec_end = unsafe { c_src.add(n & !15) };
-    let c_src_end = unsafe { c_src.add(n) };
-    while c_src != c_src_vec_end {
-        let cv = unsafe { _mm512_loadu_ps(c_src) };
-        unsafe { _mm512_storeu_ps(c_dst, cv) };
-        c_src = unsafe { c_src.add(16) };
-        c_dst = unsafe { c_dst.add(16) };
-    }
-    while c_src != c_src_end {
-        unsafe { *c_dst = *c_src };
-        c_src = unsafe { c_src.add(1) };
-        c_dst = unsafe { c_dst.add(1) };
-    }
-
-    // Load `b` into `c`.
-    let mut c_ptr = c;
-    let mut b_ptr = b;
-    let c_end = unsafe { c.add(n) };
-    let c_vec_end = unsafe { c.add(n & !15) };
-    while c_ptr != c_vec_end {
-        let bv = unsafe { _mm512_loadu_ps(b_ptr) };
-        unsafe { _mm512_storeu_ps(c_ptr, bv) };
-        c_ptr = unsafe { c_ptr.add(16) };
-        b_ptr = unsafe { b_ptr.add(16) };
-    }
-    while c_ptr != c_end {
-        unsafe { *c_ptr = *b_ptr };
-        c_ptr = unsafe { c_ptr.add(1) };
-        b_ptr = unsafe { b_ptr.add(1) };
-    }
-
-    // Accumulate `c += buf[ki] * a[ki, :]`.
-    let mut ki = 0usize;
-    let out_vec_end_base = unsafe { c.add(n & !15) };
-    let out_end_base = unsafe { c.add(n) };
-    while ki < k {
-        let c_scalar = unsafe { *buf.add(ki) };
-        let c_vec = _mm512_set1_ps(c_scalar);
-
-        let mut a_ptr = unsafe { a.add(ki * lda) };
-        let mut out_ptr = c;
-        while out_ptr != out_vec_end_base {
-            let out_v = unsafe { _mm512_loadu_ps(out_ptr) };
-            let a_v = unsafe { _mm512_loadu_ps(a_ptr) };
-            let sum_v = _mm512_fmadd_ps(c_vec, a_v, out_v);
-            unsafe { _mm512_storeu_ps(out_ptr, sum_v) };
-
-            out_ptr = unsafe { out_ptr.add(16) };
-            a_ptr = unsafe { a_ptr.add(16) };
+    for i in 0..m {
+        let mut j = 0;
+        while j + 15 < n {
+            let c_vec = unsafe { _mm512_loadu_ps(c.add(j)) };
+            unsafe { _mm512_storeu_ps(d.add(i * ldd as usize + j), c_vec) };
+            j += 16;
         }
-
-        while out_ptr != out_end_base {
-            unsafe { *out_ptr += c_scalar * *a_ptr };
-            out_ptr = unsafe { out_ptr.add(1) };
-            a_ptr = unsafe { a_ptr.add(1) };
+        while j < n {
+            unsafe { *d.add(i * ldd as usize + j) = *c.add(j) };
+            j += 1;
         }
-
-        ki += 1;
     }
-    */
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bk in (0..k).step_by(BLOCK_SIZE) {
+            for bj in (0..n).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+
+                for i in bi..i_end {
+                    for k_idx in bk..k_end {
+                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
+                        let a_vec = _mm512_set1_ps(a_val);
+
+                        let mut j = bj;
+                        while j + 15 < j_end {
+                            let d_ptr = unsafe { d.add(i * ldd as usize + j) };
+                            let b_ptr = unsafe { b.add(k_idx * ldb as usize + j) };
+
+                            let d_vec = unsafe { _mm512_loadu_ps(d_ptr) };
+                            let b_vec = unsafe { _mm512_loadu_ps(b_ptr) };
+
+                            let out = _mm512_fmadd_ps(a_vec, b_vec, d_vec);
+                            unsafe { _mm512_storeu_ps(d_ptr, out) };
+
+                            j += 16;
+                        }
+
+                        while j < j_end {
+                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
+                            unsafe { *d.add(i * ldd as usize + j) += a_val * b_val };
+                            j += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

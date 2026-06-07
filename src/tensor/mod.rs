@@ -332,7 +332,7 @@ where
         )?;
 
         unsafe {
-            M::Base::mul_mk_kn(
+            M::Base::mul_mn_mk_kn(
                 &mut self.device,
                 &self.layout,
                 &A.device,
@@ -367,7 +367,7 @@ where
         )?;
 
         unsafe {
-            M::Base::mul_mk_knt(
+            M::Base::mul_mn_mk_knt(
                 &mut self.device,
                 &self.layout,
                 &A.device,
@@ -417,7 +417,7 @@ where
         validate_shape(c.layout.nrow, c.layout.ncol, 1, self.layout.ncol)?;
 
         unsafe {
-            M::Base::muladd_mk_kn_1n(
+            M::Base::mul_mn_mk_kn_1n(
                 &mut self.device,
                 &self.layout,
                 &A.device,
