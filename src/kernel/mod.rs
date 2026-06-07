@@ -181,34 +181,45 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     }
 }
 
-/// Applies Softmax in place: `x[i] = exp(x[i]) / sum(exp(x)) * alpha`.
+/// Applies Safe Softmax in place: `x[i] = exp(alpha * (x[i] - max(x))) / sum(exp(alpha * (x - max(x))))`.
 ///
 /// # Safety
 ///
 /// - `x` must be valid for `n` contiguous `f32` values.
 /// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-pub(crate) unsafe fn softmax_n(x: *mut f32, alpha: f32, n: usize) -> () {
+/// - `alpha`` must be positive number.
+pub(crate) unsafe fn safe_softmax_n(x: *mut f32, alpha: f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { x86_64::softmax_n_avx512(x, alpha, n) };
+            return unsafe { x86_64::safe_softmax_n_avx512(x, alpha, n) };
         }
     }
 
     let end = unsafe { x.add(n) };
-    let mut ptr = x;
 
-    let mut sum = 0.0;
+    let mut max_val = f32::NEG_INFINITY;
+    let mut ptr = x;
     while ptr != end {
         let v = unsafe { *ptr };
-        let exp_v = v.exp();
+        if v > max_val {
+            max_val = v;
+        }
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let mut sum = 0.0;
+    let mut ptr = x;
+    while ptr != end {
+        let v = unsafe { *ptr };
+        let exp_v = (alpha * (v - max_val)).exp();
         unsafe { *ptr = exp_v };
         sum += exp_v;
         ptr = unsafe { ptr.add(1) };
     }
 
+    let multiplier = 1.0 / sum;
     let mut ptr = x;
-    let multiplier = alpha / sum;
     while ptr != end {
         unsafe { *ptr *= multiplier };
         ptr = unsafe { ptr.add(1) };

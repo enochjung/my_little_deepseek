@@ -115,7 +115,7 @@ where
             let vi = v.slice(0..n + 1, kvi * d..(kvi + 1) * d);
 
             score.mul_bt(&qi, &ki.transpose())?;
-            score.softmax(1.0 / ((d as f32).sqrt()));
+            score.safe_softmax(1.0 / ((d as f32).sqrt()));
             qi.mul(&score, &vi)?;
         }
 

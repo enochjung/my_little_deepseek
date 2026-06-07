@@ -169,7 +169,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         d: f32,
     ) -> ();
     unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> ();
-    unsafe fn softmax<M: MutableDevice<Base = Self>>(
+    unsafe fn safe_softmax<M: MutableDevice<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
         alpha: f32,

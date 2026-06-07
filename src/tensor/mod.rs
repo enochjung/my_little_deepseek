@@ -529,9 +529,9 @@ where
         unsafe { M::Base::silu(&mut self.device, &self.layout) };
     }
 
-    // self = softmax(alpha * self)
-    pub(crate) fn softmax(&mut self, alpha: f32) -> () {
-        unsafe { M::Base::softmax(&mut self.device, &self.layout, alpha) };
+    // self = safe_softmax(alpha * self). alpha > 0
+    pub(crate) fn safe_softmax(&mut self, alpha: f32) -> () {
+        unsafe { M::Base::safe_softmax(&mut self.device, &self.layout, alpha) };
     }
 }
 

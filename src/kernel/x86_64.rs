@@ -193,18 +193,46 @@ pub(crate) unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
+pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
     let vec_end = unsafe { x.add(n & !15) };
     let end = unsafe { x.add(n) };
 
+    let mut v_max = _mm512_set1_ps(f32::NEG_INFINITY);
+    let mut ptr = x;
+    while ptr != vec_end {
+        let v = unsafe { _mm512_loadu_ps(ptr) };
+        v_max = _mm512_max_ps(v_max, v);
+        ptr = unsafe { ptr.add(16) };
+    }
+
+    let mut tmp_max: [f32; 16] = [0.0; 16];
+    unsafe { _mm512_storeu_ps(tmp_max.as_mut_ptr(), v_max) };
+    let mut max_val = f32::NEG_INFINITY;
+    for i in 0..16 {
+        if tmp_max[i] > max_val {
+            max_val = tmp_max[i];
+        }
+    }
+
+    while ptr != end {
+        let v = unsafe { *ptr };
+        if v > max_val {
+            max_val = v;
+        }
+        ptr = unsafe { ptr.add(1) };
+    }
+
     let mut sum_vec = _mm512_setzero_ps();
+    let v_max_vec = _mm512_set1_ps(max_val);
+    let v_alpha = _mm512_set1_ps(alpha);
     let mut ptr = x;
 
     while ptr != vec_end {
         let v = unsafe { _mm512_loadu_ps(ptr) };
+        let v_scaled = _mm512_mul_ps(_mm512_sub_ps(v, v_max_vec), v_alpha);
 
         let mut tmp: [f32; 16] = [0.0; 16];
-        unsafe { _mm512_storeu_ps(tmp.as_mut_ptr(), v) };
+        unsafe { _mm512_storeu_ps(tmp.as_mut_ptr(), v_scaled) };
         for i in 0..16 {
             tmp[i] = tmp[i].exp();
         }
@@ -225,13 +253,13 @@ pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
 
     while ptr != end {
         let v = unsafe { *ptr };
-        let exp_v = v.exp();
+        let exp_v = (alpha * (v - max_val)).exp();
         unsafe { *ptr = exp_v };
         sum += exp_v;
         ptr = unsafe { ptr.add(1) };
     }
-    let multiplier = alpha / sum;
 
+    let multiplier = 1.0 / sum;
     let multiplier_vec = _mm512_set1_ps(multiplier);
     let mut ptr = x;
 
