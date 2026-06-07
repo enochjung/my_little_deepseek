@@ -101,8 +101,8 @@ where
         q.muladd_bt_broadcast(&x, &self.q_weight.transpose(), &self.q_bias)?;
         k.muladd_bt_broadcast(&x, &self.k_weight.transpose(), &self.k_bias)?;
         v.muladd_bt_broadcast(&x, &self.v_weight.transpose(), &self.v_bias)?;
-        rope.execute(q, &mut tmp1_1_x_d)?;
-        rope.execute(&mut k, &mut tmp1_1_x_d)?;
+        rope.execute(q, &mut tmp1_1_x_d, self.num_attention_heads)?;
+        rope.execute(&mut k, &mut tmp1_1_x_d, self.num_key_value_heads)?;
 
         let (k, v) = kv_cache.get_kv();
         let k = k;
@@ -115,11 +115,11 @@ where
             let vi = v.slice(0..n + 1, kvi * d..(kvi + 1) * d);
 
             score.mul_bt(&qi, &ki.transpose())?;
-            score.softmax(1.0 / (d as f32).sqrt());
-            qi.mul_bt(&score, &vi.transpose())?;
+            score.softmax(1.0 / ((d as f32).sqrt()));
+            qi.mul(&score, &vi)?;
         }
 
-        x.mul(&q, &self.o_weight)?;
+        x.mul_bt(&q, &self.o_weight.transpose())?;
 
         Ok(())
     }

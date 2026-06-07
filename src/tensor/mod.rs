@@ -327,7 +327,7 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             B.layout.nrow,
         )?;
 
@@ -362,7 +362,7 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             Bt.tensor.layout.ncol,
         )?;
 

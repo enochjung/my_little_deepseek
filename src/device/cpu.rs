@@ -43,6 +43,7 @@ impl MutableDevice for Cpu {
 }
 impl OwnedDevice for Cpu {
     fn new(len: usize) -> Result<Self, crate::Error> {
+        let len = len.max(PAGE_SIZE).next_power_of_two();
         let ptr = new_mmap(len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
@@ -62,7 +63,7 @@ impl TryFrom<std::fs::File> for Cpu {
     fn try_from(file: std::fs::File) -> Result<Self, Self::Error> {
         let metadata = file.metadata().map_err(crate::Error::io)?;
         let fd = file.as_raw_fd();
-        let len = metadata.len() as usize;
+        let len = (metadata.len() as usize).max(PAGE_SIZE);
         let ptr = file_mmap(fd, len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
@@ -175,10 +176,10 @@ impl DeviceOps<F32> for Cpu {
         let src1 = unsafe { src1.as_ptr().byte_add(src1_layout.offset) } as *const f32;
 
         if dst_layout.is_packed() && src1_layout.is_packed() {
-            let len = (dst_layout.nrow * dst_layout.ncol) as usize * F32::BYTES;
+            let len = (dst_layout.nrow * dst_layout.ncol) as usize;
             unsafe { kernel::mul_n_n(dst, src1, alpha, len) };
         } else {
-            let len = dst_layout.ncol as usize * F32::BYTES;
+            let len = dst_layout.ncol as usize;
 
             let mut dst = dst;
             let mut src1 = src1;

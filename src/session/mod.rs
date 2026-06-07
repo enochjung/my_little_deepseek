@@ -79,7 +79,13 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
                     INITIAL_N * model.head_size as usize * model.num_key_value_heads * E::BYTES,
                 )?;
 
-                KVCache::<E, _>::new(k_device, v_device, model.head_size, 0)
+                KVCache::<E, _>::new(
+                    k_device,
+                    v_device,
+                    model.head_size,
+                    model.num_key_value_heads,
+                    0,
+                )
             })
             .collect::<Result<_, _>>()?;
 
