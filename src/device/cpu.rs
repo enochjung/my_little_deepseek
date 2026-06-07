@@ -416,7 +416,7 @@ fn resize_mmap(ptr: *mut (), prev_len: usize, new_len: usize) -> Result<*mut (),
             ));
         }
 
-        let new_ptr_const = new_mmap(-1, new_len)?;
+        let new_ptr_const = new_mmap(new_len)?;
         let new_ptr = new_ptr_const as *mut u8;
 
         unsafe {
