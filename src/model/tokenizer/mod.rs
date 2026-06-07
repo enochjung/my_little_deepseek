@@ -31,12 +31,16 @@ impl Tokenizer {
         })
     }
 
-    pub(crate) fn execute(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
+    pub(crate) fn encode(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
         let normalized_input = self.normalizer.execute(input)?;
         let pretokenized_input = self.pretokenizer.execute(&normalized_input);
-        let tokens = self.tokenizer_model.execute(&pretokenized_input)?;
+        let tokens = self.tokenizer_model.encode(&pretokenized_input)?;
 
         Ok(tokens)
+    }
+
+    pub(crate) fn decode(&self, tokens: &[u32]) -> Result<(usize, String), crate::Error> {
+        self.tokenizer_model.decode(tokens)
     }
 }
 
@@ -82,7 +86,7 @@ mod tests {
     fn assert(input: &str, expected: &[u32]) {
         let tokenizer = get_tokenizer();
 
-        let actual = tokenizer.execute(input).expect("tokenizing should succeed");
+        let actual = tokenizer.encode(input).expect("tokenizing should succeed");
         assert_eq!(
             actual, expected,
             "actual: {:?}, expected: {:?}",

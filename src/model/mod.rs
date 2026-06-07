@@ -159,7 +159,7 @@ impl<E: ElemType, ED: Device, TD: Device> Model<E, ED, TD> {
     }
 
     pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
-        self.tokenizer.execute(input)
+        self.tokenizer.encode(input)
     }
 }
 
@@ -226,6 +226,10 @@ where
         let next_token = self.sampling(x, &mut tmp_1_x_v)?;
 
         Ok(next_token)
+    }
+
+    pub(crate) fn detokenize(&self, tokens: &[u32]) -> Result<(usize, String), crate::Error> {
+        self.tokenizer.decode(tokens)
     }
 
     fn token_embedding<M0: MutableDevice<Base = ED::Base>>(

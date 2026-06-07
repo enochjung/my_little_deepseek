@@ -40,6 +40,7 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
         tokens.push(special_token::ASSISTANT);
         tokens.push(special_token::THINK_START);
 
+        let decoded_cursor = tokens.len();
         let prefill_start = (kv_caches[0].n() as usize).min(tokens.len());
         let prefill_tokens = tokens[prefill_start..].to_vec();
         let abort_flag = Arc::new(AtomicBool::new(false));
@@ -59,6 +60,7 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
         Ok(SessionTask {
             model,
             tokens,
+            decoded_cursor,
             abort_flag,
             finished_flag,
             token_rx,
@@ -101,6 +103,7 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
 pub struct SessionTask<'a, E: ElemType, ED: Device, TD: Device> {
     model: &'a Model<E, ED, TD>,
     tokens: Vec<u32>,
+    decoded_cursor: usize,
     abort_flag: Arc<AtomicBool>,
     finished_flag: Arc<AtomicBool>,
     token_rx: mpsc::Receiver<u32>,
@@ -108,7 +111,11 @@ pub struct SessionTask<'a, E: ElemType, ED: Device, TD: Device> {
 }
 
 #[allow(private_bounds)]
-impl<'a, E: ElemType, ED: Device, TD: Device> SessionTask<'a, E, ED, TD> {
+impl<'a, E: ElemType, ED: Device, TD: Device> SessionTask<'a, E, ED, TD>
+where
+    ED::Base: DeviceOps<E>,
+    TD::Base: DeviceOps<E>,
+{
     /// Returns true once the worker thread has stopped.
     pub fn is_finished(&self) -> bool {
         self.finished_flag.load(Ordering::Relaxed)
@@ -137,10 +144,24 @@ impl<'a, E: ElemType, ED: Device, TD: Device> SessionTask<'a, E, ED, TD> {
 
     /// Returns at most one generated token id as a readable string.
     pub fn get_next_string(&mut self) -> Option<String> {
-        // TODO: return readable string.
         let token_id = self.token_rx.try_recv().ok()?;
         self.tokens.push(token_id);
-        Some(render_token_id(token_id))
+
+        if let Some(special_str) = render_special_token(token_id) {
+            self.decoded_cursor = self.tokens.len();
+            return Some(special_str);
+        }
+
+        let un_decoded_tokens = &self.tokens[self.decoded_cursor..];
+
+        if let Ok((consumed, decoded_str)) = self.model.detokenize(un_decoded_tokens) {
+            if consumed > 0 {
+                self.decoded_cursor += consumed;
+                return Some(decoded_str);
+            }
+        }
+
+        Some(String::new())
     }
 }
 
@@ -150,16 +171,16 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Drop for SessionTask<'a, E, ED, TD
     }
 }
 
-fn render_token_id(token_id: u32) -> String {
-    match token_id {
+fn render_special_token(token: u32) -> Option<String> {
+    Some(match token {
         special_token::BEGIN_OF_SENTENCE => "<begin_of_sentence>".to_string(),
         special_token::USER => "<user>".to_string(),
         special_token::ASSISTANT => "<assistant>".to_string(),
         special_token::THINK_START => "<think>".to_string(),
         special_token::THINK_END => "</think>".to_string(),
         special_token::END_OF_SENTENCE => "<end_of_sentence>".to_string(),
-        _ => format!("<{token_id}>"),
-    }
+        _ => return None,
+    })
 }
 
 fn run<'a, E: ElemType, ED: Device, TD: Device>(

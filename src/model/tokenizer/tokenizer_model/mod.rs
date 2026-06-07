@@ -21,19 +21,23 @@ impl TokenizerModel {
         Ok(Self { merge, vocab })
     }
 
-    pub(crate) fn execute(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, crate::Error> {
+    pub(crate) fn encode(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, crate::Error> {
         let mut token_ids = Vec::new();
 
         for word in pretokenized {
             let merged_word = self.merge.execute(word)?;
 
             for token in merged_word {
-                let token_id = self.vocab.execute(&token)?;
+                let token_id = self.vocab.encode(&token)?;
                 token_ids.push(token_id);
             }
         }
 
         Ok(token_ids)
+    }
+
+    pub(crate) fn decode(&self, tokens: &[u32]) -> Result<(usize, String), crate::Error> {
+        self.vocab.decode(tokens)
     }
 }
 
@@ -54,9 +58,7 @@ mod tests {
         };
         let model_engine = TokenizerModel::new(&merge_format, &vocab_format)
             .expect("initializing model should succeed");
-        let actual = model_engine
-            .execute(input)
-            .expect("encoding should succeed");
+        let actual = model_engine.encode(input).expect("encoding should succeed");
         assert_eq!(
             actual, expected,
             "actual:{:?}, expected:{:?}",
