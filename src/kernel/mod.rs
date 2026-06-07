@@ -201,6 +201,45 @@ pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f3
     }
 }
 
+/// Computes `C = A * B`
+///
+/// # Parameters
+///
+/// - `c`: `C` base pointer, shape `(m, n)`.
+/// - `rmc`: `true` if `C` is row-major.
+/// - `ldc`: `C` leading dimension.
+/// - `a`: `A` base pointer, shape `(m, k)`.
+/// - `rma`: `true` if `A` is row-major.
+/// - `lda`: `A` leading dimension.
+/// - `b`: `B` base pointer, shape `(k, n)`.
+/// - `rmb`: `true` if `B` is row-major.
+/// - `ldb`: `B` leading dimension.
+/// - `m`: shape `m`
+/// - `k`: shape `k`.
+/// - `n`: shape `n`.
+///
+/// # Safety
+///
+/// - `a`, `b`, and `c` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
+/// - `a`, `b`, and `c` do not overlap.
+/// - `a`, `b`, and `c` are 4-byte aligned.
+pub(crate) unsafe fn mul_mk_kn(
+    c: *mut f32,
+    rmc: bool,
+    ldc: usize,
+    a: *const f32,
+    rma: bool,
+    lda: usize,
+    b: *const f32,
+    rmb: bool,
+    ldb: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    todo!()
+}
+
 /// Computes `D = A * B + c` with `c` broadcasted.
 ///
 /// # Parameters
@@ -237,7 +276,6 @@ pub(crate) unsafe fn muladd_mk_kn_1n(
     rmb: bool,
     ldb: usize,
     c: *const f32,
-    buf: *mut f32,
     m: usize,
     k: usize,
     n: usize,
@@ -248,7 +286,7 @@ pub(crate) unsafe fn muladd_mk_kn_1n(
             {
                 if is_x86_feature_detected!("avx512f") {
                     return unsafe {
-                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, buf, m, k, n)
+                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
                     };
                 }
             }

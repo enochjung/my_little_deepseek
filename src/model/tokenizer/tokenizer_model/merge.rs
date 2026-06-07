@@ -1,11 +1,11 @@
 use crate::config::{Format, MergeFormat};
 use std::collections::{HashMap, LinkedList};
 
-pub(crate) struct MergeEngine {
+pub(crate) struct Merge {
     merge_map: MergeMap,
 }
 
-impl MergeEngine {
+impl Merge {
     pub(crate) fn new(merge_format: &MergeFormat) -> Result<Self, crate::Error> {
         let mut merge_map = MergeMap::new();
 
@@ -24,7 +24,7 @@ impl MergeEngine {
         Ok(Self { merge_map })
     }
 
-    pub(crate) fn merge(&self, list: &[String]) -> Result<Vec<String>, crate::Error> {
+    pub(crate) fn execute(&self, list: &[String]) -> Result<Vec<String>, crate::Error> {
         let mut tokens: LinkedList<String> = list.iter().cloned().collect();
 
         loop {

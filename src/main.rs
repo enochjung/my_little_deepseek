@@ -32,54 +32,63 @@ fn main() {
             path: WEIGHT_PATH.to_string(),
         });
 
-    let model = Model::new(conf).expect("initializing model should succeed");
-    let mut session = model.new_session();
+    let model = Model::new(conf).expect("`Model::new` should succeed");
+    let mut session = model
+        .new_session()
+        .expect("`Model::new_session` should succeed");
 
     println!("done!");
     println!("---------------------------------");
 
-    loop {
-        print!("[User]: ");
-        let mut input = String::new();
-        let bytes_read = std::io::stdin()
-            .read_line(&mut input)
-            .expect("reading line from user failed");
-        if bytes_read == 0 {
-            break;
-        }
-
-        let input = input.trim_end_matches('\n');
-        if input == "/exit" {
-            break;
-        }
-
-        std::io::stdout().flush().unwrap();
-        println!();
-
-        let mut session_task = session
-            .send_prompt(input)
-            .expect("generating session-task should succeed");
-
-        println!("[Assistant]: ");
-
+    std::thread::scope(|s| {
         loop {
-            if let Some(output) = session_task.get_next_string() {
-                print!("{output}");
-                std::io::stdout().flush().unwrap();
-            }
-
-            if session_task.is_finished() {
-                session = session_task
-                    .finish_decoding()
-                    .expect("decoding should succeed");
+            print!("[User]: ");
+            let mut input = String::new();
+            let bytes_read = std::io::stdin()
+                .read_line(&mut input)
+                .expect("reading line from user failed");
+            if bytes_read == 0 {
                 break;
             }
 
-            std::thread::sleep(Duration::from_millis(100));
-        }
+            let input = input.trim_end_matches('\n');
+            if input == "/exit" {
+                break;
+            }
 
-        println!();
-    }
+            std::io::stdout().flush().unwrap();
+            println!();
+
+            let mut session_task = session
+                .send_prompt(s, input)
+                .expect("`Session::send_prompt` should succeed");
+
+            println!("[Assistant]: ");
+
+            loop {
+                while let Some(output) = session_task.get_next_string() {
+                    print!("{output}");
+                    std::io::stdout().flush().unwrap();
+                }
+
+                if session_task.is_finished() {
+                    while let Some(output) = session_task.get_next_string() {
+                        print!("{output}");
+                        std::io::stdout().flush().unwrap();
+                    }
+                    break;
+                }
+
+                std::thread::sleep(Duration::from_millis(50));
+            }
+
+            session = session_task
+                .finish_decoding()
+                .expect("decoding should succeed");
+
+            println!();
+        }
+    });
 
     println!("---------------------------------");
     println!("Goodbye!");

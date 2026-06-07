@@ -2,36 +2,33 @@ mod merge;
 mod vocab;
 
 use crate::config::{MergeFormat, VocabFormat};
-use merge::MergeEngine;
-use vocab::VocabEngine;
+use merge::Merge;
+use vocab::Vocab;
 
-pub(crate) struct ModelEngine {
-    merge_engine: MergeEngine,
-    vocab_engine: VocabEngine,
+pub(crate) struct TokenizerModel {
+    merge: Merge,
+    vocab: Vocab,
 }
 
-impl ModelEngine {
+impl TokenizerModel {
     pub(crate) fn new(
         merge_format: &MergeFormat,
         vocab_format: &VocabFormat,
     ) -> Result<Self, crate::Error> {
-        let merge_engine = MergeEngine::new(merge_format)?;
-        let vocab_engine = VocabEngine::new(vocab_format)?;
+        let merge = Merge::new(merge_format)?;
+        let vocab = Vocab::new(vocab_format)?;
 
-        Ok(Self {
-            merge_engine,
-            vocab_engine,
-        })
+        Ok(Self { merge, vocab })
     }
 
-    pub(crate) fn encode(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, crate::Error> {
+    pub(crate) fn execute(&self, pretokenized: &[Vec<String>]) -> Result<Vec<u32>, crate::Error> {
         let mut token_ids = Vec::new();
 
         for word in pretokenized {
-            let merged_word = self.merge_engine.merge(word)?;
+            let merged_word = self.merge.execute(word)?;
 
             for token in merged_word {
-                let token_id = self.vocab_engine.tokenize(&token)?;
+                let token_id = self.vocab.execute(&token)?;
                 token_ids.push(token_id);
             }
         }
@@ -42,7 +39,7 @@ impl ModelEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::ModelEngine;
+    use super::TokenizerModel;
     use crate::config::{MergeFormat, VocabFormat};
 
     const MERGE_PATH: &'static str = "model/merges.json";
@@ -55,9 +52,11 @@ mod tests {
         let vocab_format = VocabFormat::HuggingFace {
             path: VOCAB_PATH.to_string(),
         };
-        let model_engine = ModelEngine::new(&merge_format, &vocab_format)
+        let model_engine = TokenizerModel::new(&merge_format, &vocab_format)
             .expect("initializing model should succeed");
-        let actual = model_engine.encode(input).expect("encoding should succeed");
+        let actual = model_engine
+            .execute(input)
+            .expect("encoding should succeed");
         assert_eq!(
             actual, expected,
             "actual:{:?}, expected:{:?}",

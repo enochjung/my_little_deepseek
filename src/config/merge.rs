@@ -1,5 +1,6 @@
 use super::{Format, parse_string_with_escape_sequence};
-use crate::storage::Mmap;
+use crate::device::Cpu;
+use std::fs::File;
 
 pub enum MergeFormat {
     HuggingFace { path: String },
@@ -7,20 +8,21 @@ pub enum MergeFormat {
 
 impl Format for MergeFormat {
     type Output = Result<(String, String), crate::Error>;
-    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Parser = fn(&Cpu) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
-    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Cpu, Self::Parser), crate::Error> {
         match &self {
             MergeFormat::HuggingFace { path } => {
-                let file = Mmap::new(path)?;
-                Ok((file, parse_huggingface))
+                let file = File::open(path).map_err(crate::Error::io)?;
+                let storage = Cpu::try_from(file)?;
+                Ok((storage, parse_huggingface))
             }
         }
     }
 }
 
 fn parse_huggingface(
-    file: &Mmap,
+    file: &Cpu,
 ) -> Box<dyn Iterator<Item = Result<(String, String), crate::Error>> + '_> {
     let lines = file.as_slice().split(|&x| x == b'\n');
 

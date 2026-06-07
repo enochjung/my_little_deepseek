@@ -8,7 +8,7 @@ impl Pretokenizer {
         Self {}
     }
 
-    pub(crate) fn pretokenize(&self, input: &str) -> Vec<Vec<String>> {
+    pub(crate) fn execute(&self, input: &str) -> Vec<Vec<String>> {
         let split_slices = split::pretokenize(input);
         let byte_level_tokens = byte_level::pretokenize(&split_slices);
 

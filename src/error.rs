@@ -50,14 +50,6 @@ impl Error {
         }
     }
 
-    pub(crate) fn operation_not_supported(operation: &'static str) -> Self {
-        Self {
-            kind: ErrorKind::OperationNotSupported {
-                operation: operation,
-            },
-        }
-    }
-
     pub(crate) fn insufficient_storage_space(required: usize, actual: usize) -> Self {
         Self {
             kind: ErrorKind::InsufficientStorageSpace { required, actual },
@@ -82,7 +74,6 @@ enum ErrorKind {
     ShapeMismatch { expected: usize, actual: usize },
     OutOfBound { index: usize, limit: usize },
     ConfigureFailed { field: String },
-    OperationNotSupported { operation: &'static str },
     InsufficientStorageSpace { required: usize, actual: usize },
 }
 
@@ -106,9 +97,6 @@ impl std::fmt::Display for ErrorKind {
             }
             Self::ConfigureFailed { field } => {
                 write!(f, "configuration failed at {field}")
-            }
-            Self::OperationNotSupported { operation } => {
-                write!(f, "operation not supported: {operation}")
             }
             Self::InsufficientStorageSpace { required, actual } => write!(
                 f,
