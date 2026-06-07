@@ -54,20 +54,20 @@ where
     ) -> Result<(), crate::Error> {
         let i = self.intermediate_size;
 
-        let tmp_3_x_i = tmp_3_x_i.slice_mut(0..2, 0..i);
+        let tmp_3_x_i = tmp_3_x_i.slice_mut(0..3, 0..i);
         let (mut gate, tmp_2_x_i) = tmp_3_x_i.split_row(1)?;
         let (mut up, mut activated) = tmp_2_x_i.split_row(1)?;
 
         self.rms_norm.execute(x)?;
 
-        gate.mul(&x, &self.gate)?;
-        up.mul(&x, &self.up)?;
+        gate.mul_bt(&x, &self.gate.transpose())?;
+        up.mul_bt(&x, &self.up.transpose())?;
 
         gate.silu();
 
         activated.mul_elementwise(&gate, &up, 1.0)?;
 
-        x.mul(&activated, &self.down)?;
+        x.mul_bt(&activated, &self.down.transpose())?;
 
         Ok(())
     }

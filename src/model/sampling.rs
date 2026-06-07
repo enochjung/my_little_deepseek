@@ -37,9 +37,10 @@ where
         let mut x = x;
 
         self.rms_norm.execute(&mut x)?;
-        tmp_1_x_v.mul(&x, &self.lm_head)?;
+        tmp_1_x_v.mul_bt(&x, &self.lm_head.transpose())?;
 
-        todo!()
-        //let next_token = argmax(&logits);
+        let next_token = tmp_1_x_v.argmax()?;
+
+        Ok(next_token)
     }
 }

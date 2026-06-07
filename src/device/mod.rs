@@ -67,6 +67,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src: &D0,
         src_layout: &Layout,
     ) -> ();
+    unsafe fn argmax<D: Device<Base = Self>>(src: &D, src_layout: &Layout) -> u32;
     unsafe fn cast_from_bf16<M: MutableDevice<Base = Self>, D0: Device<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
@@ -92,7 +93,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1_layout: &Layout,
         alpha: f32,
     ) -> ();
-    unsafe fn mul_mk_kn<
+    unsafe fn mul_mn_mk_kn<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -104,7 +105,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1: &D1,
         src1_layout: &Layout,
     ) -> ();
-    unsafe fn mul_mk_knt<
+    unsafe fn mul_mn_mk_knt<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -116,7 +117,22 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src1: &D1,
         src1_layout_t: &Layout,
     ) -> ();
-    unsafe fn muladd_mk_kn_1n<
+    unsafe fn mul_mn_mk_kn_1n<
+        M: MutableDevice<Base = Self>,
+        D0: Device<Base = Self>,
+        D1: Device<Base = Self>,
+        D2: Device<Base = Self>,
+    >(
+        dst: &mut M,
+        dst_layout: &Layout,
+        src0: &D0,
+        src0_layout: &Layout,
+        src1: &D1,
+        src1_layout: &Layout,
+        src2: &D2,
+        src2_layout: &Layout,
+    ) -> ();
+    unsafe fn mul_mn_mk_knt_1n<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -153,7 +169,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         d: f32,
     ) -> ();
     unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> ();
-    unsafe fn softmax<M: MutableDevice<Base = Self>>(
+    unsafe fn safe_softmax<M: MutableDevice<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
         alpha: f32,

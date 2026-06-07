@@ -52,8 +52,8 @@ pub(crate) struct Tensor<E: ElemType, D: Device> {
     _phantom: PhantomData<E>,
 }
 
-pub(crate) struct Trans<E: ElemType, D: Device> {
-    tensor: Tensor<E, D>,
+pub(crate) struct Trans<'a, E: ElemType, D: Device> {
+    tensor: &'a Tensor<E, D>,
 }
 
 impl<E: ElemType, D: Device> Tensor<E, D> {
@@ -78,7 +78,7 @@ impl<E: ElemType, D: Device> Tensor<E, D> {
         })
     }
 
-    pub(crate) fn transpose(self) -> Trans<E, D> {
+    pub(crate) fn transpose(&self) -> Trans<'_, E, D> {
         Trans { tensor: self }
     }
 
@@ -235,6 +235,12 @@ where
         Ok(())
     }
 
+    pub(crate) fn argmax(&self) -> Result<u32, crate::Error> {
+        validate_shape(self.layout.nrow, self.layout.ncol, 1, self.layout.ncol)?;
+
+        Ok(unsafe { M::Base::argmax(&self.device, &self.layout) })
+    }
+
     pub(crate) fn cast_from_bf16<D0: Device<Base = M::Base>>(
         &mut self,
         other: &Tensor<BF16, D0>,
@@ -321,12 +327,12 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             B.layout.nrow,
         )?;
 
         unsafe {
-            M::Base::mul_mk_kn(
+            M::Base::mul_mn_mk_kn(
                 &mut self.device,
                 &self.layout,
                 &A.device,
@@ -356,12 +362,12 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             Bt.tensor.layout.ncol,
         )?;
 
         unsafe {
-            M::Base::mul_mk_knt(
+            M::Base::mul_mn_mk_knt(
                 &mut self.device,
                 &self.layout,
                 &A.device,
@@ -399,19 +405,77 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             B.layout.nrow,
         )?;
-        validate_shape(c.layout.nrow, c.layout.ncol, 1, B.layout.ncol)?;
+        validate_shape(
+            B.layout.nrow,
+            B.layout.ncol,
+            A.layout.ncol,
+            self.layout.ncol,
+        )?;
+        validate_shape(c.layout.nrow, c.layout.ncol, 1, self.layout.ncol)?;
 
         unsafe {
-            M::Base::muladd_mk_kn_1n(
+            M::Base::mul_mn_mk_kn_1n(
                 &mut self.device,
                 &self.layout,
                 &A.device,
                 &A.layout,
                 &B.device,
                 &B.layout,
+                &c.device,
+                &c.layout,
+            )
+        };
+
+        Ok(())
+    }
+
+    // self = AB^T + c
+    // shape of self must be (A.nrow * B.ncol)
+    // A.ncol may 1536
+    // B.nrow must be equal to A.ncol
+    // shape of C must be (1 * B.ncol)
+    // c is expanded in calculation
+    pub(crate) fn muladd_bt_broadcast<
+        D0: Device<Base = M::Base>,
+        D1: Device<Base = M::Base>,
+        D2: Device<Base = M::Base>,
+    >(
+        &mut self,
+        #[allow(non_snake_case)] A: &Tensor<E, D0>,
+        #[allow(non_snake_case)] B: &Trans<'_, E, D1>,
+        c: &Tensor<E, D2>,
+    ) -> Result<(), crate::Error> {
+        validate_shape(
+            self.layout.nrow,
+            self.layout.ncol,
+            A.layout.nrow,
+            B.tensor.layout.nrow,
+        )?;
+        validate_shape(
+            A.layout.nrow,
+            A.layout.ncol,
+            self.layout.nrow,
+            B.tensor.layout.ncol,
+        )?;
+        validate_shape(
+            B.tensor.layout.ncol,
+            B.tensor.layout.nrow,
+            A.layout.ncol,
+            self.layout.ncol,
+        )?;
+        validate_shape(c.layout.nrow, c.layout.ncol, 1, self.layout.ncol)?;
+
+        unsafe {
+            M::Base::mul_mn_mk_knt_1n(
+                &mut self.device,
+                &self.layout,
+                &A.device,
+                &A.layout,
+                &B.tensor.device,
+                &B.tensor.layout,
                 &c.device,
                 &c.layout,
             )
@@ -465,9 +529,9 @@ where
         unsafe { M::Base::silu(&mut self.device, &self.layout) };
     }
 
-    // self = softmax(alpha * self)
-    pub(crate) fn softmax(&mut self, alpha: f32) -> () {
-        unsafe { M::Base::softmax(&mut self.device, &self.layout, alpha) };
+    // self = safe_softmax(alpha * self). alpha > 0
+    pub(crate) fn safe_softmax(&mut self, alpha: f32) -> () {
+        unsafe { M::Base::safe_softmax(&mut self.device, &self.layout, alpha) };
     }
 }
 

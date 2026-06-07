@@ -1,5 +1,41 @@
 mod x86_64;
 
+/// Returns the index of the maximum value in `x[0..n]`.
+/// Typically used in `lm_head` for greedy decoding.
+///
+/// # Safety
+///
+/// - `x` must be valid for `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// - `n > 0` to avoid undefined behavior.
+pub(crate) unsafe fn argmax_n(x: *const f32, n: usize) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::argmax_n_avx512(x, n) };
+        }
+    }
+
+    let mut max_val = unsafe { *x };
+    let mut max_idx = 0;
+
+    let mut ptr = unsafe { x.add(1) };
+    let end = unsafe { x.add(n) };
+    let mut idx = 1;
+
+    while ptr != end {
+        let val = unsafe { *ptr };
+        if val > max_val {
+            max_val = val;
+            max_idx = idx;
+        }
+        ptr = unsafe { ptr.add(1) };
+        idx += 1;
+    }
+
+    max_idx as u32
+}
+
 /// Copies `len` bytes from `src` to `dst` without allowing overlap.
 ///
 /// # Safety
@@ -145,6 +181,51 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     }
 }
 
+/// Applies Safe Softmax in place: `x[i] = exp(alpha * (x[i] - max(x))) / sum(exp(alpha * (x - max(x))))`.
+///
+/// # Safety
+///
+/// - `x` must be valid for `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// - `alpha`` must be positive number.
+pub(crate) unsafe fn safe_softmax_n(x: *mut f32, alpha: f32, n: usize) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::safe_softmax_n_avx512(x, alpha, n) };
+        }
+    }
+
+    let end = unsafe { x.add(n) };
+
+    let mut max_val = f32::NEG_INFINITY;
+    let mut ptr = x;
+    while ptr != end {
+        let v = unsafe { *ptr };
+        if v > max_val {
+            max_val = v;
+        }
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let mut sum = 0.0;
+    let mut ptr = x;
+    while ptr != end {
+        let v = unsafe { *ptr };
+        let exp_v = (alpha * (v - max_val)).exp();
+        unsafe { *ptr = exp_v };
+        sum += exp_v;
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let multiplier = 1.0 / sum;
+    let mut ptr = x;
+    while ptr != end {
+        unsafe { *ptr *= multiplier };
+        ptr = unsafe { ptr.add(1) };
+    }
+}
+
 /// Fills `x[0..n]` with RoPE cosine factors computed as:
 /// `cos(k / (theta^(2 * i / d)))` for `i` in `0..n`.
 ///
@@ -201,18 +282,17 @@ pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f3
     }
 }
 
+const BLOCK_SIZE: usize = 64;
+
 /// Computes `C = A * B`
 ///
 /// # Parameters
 ///
 /// - `c`: `C` base pointer, shape `(m, n)`.
-/// - `rmc`: `true` if `C` is row-major.
 /// - `ldc`: `C` leading dimension.
 /// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `rma`: `true` if `A` is row-major.
 /// - `lda`: `A` leading dimension.
 /// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `rmb`: `true` if `B` is row-major.
 /// - `ldb`: `B` leading dimension.
 /// - `m`: shape `m`
 /// - `k`: shape `k`.
@@ -223,38 +303,127 @@ pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f3
 /// - `a`, `b`, and `c` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
 /// - `a`, `b`, and `c` do not overlap.
 /// - `a`, `b`, and `c` are 4-byte aligned.
-pub(crate) unsafe fn mul_mk_kn(
+pub(crate) unsafe fn mul_rmn_rmk_rkn(
     c: *mut f32,
-    rmc: bool,
-    ldc: usize,
+    ldc: u32,
     a: *const f32,
-    rma: bool,
-    lda: usize,
+    lda: u32,
     b: *const f32,
-    rmb: bool,
-    ldb: usize,
+    ldb: u32,
     m: usize,
     k: usize,
     n: usize,
 ) -> () {
-    todo!()
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::mul_rmn_rmk_rkn_avx512(c, ldc, a, lda, b, ldb, m, k, n) };
+        }
+    }
+
+    for i in 0..m {
+        for j in 0..n {
+            unsafe { *c.add(i * ldc as usize + j) = 0.0 };
+        }
+    }
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bk in (0..k).step_by(BLOCK_SIZE) {
+            for bj in (0..n).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+
+                for i in bi..i_end {
+                    for k_idx in bk..k_end {
+                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
+                        for j in bj..j_end {
+                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
+                            unsafe { *c.add(i * ldc as usize + j) += a_val * b_val };
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-/// Computes `D = A * B + c` with `c` broadcasted.
+/// Computes `C = A * B`, but `B` is column-major.
+///
+/// # Parameters
+///
+/// - `c`: `C` base pointer, shape `(m, n)`.
+/// - `ldc`: `C` leading dimension.
+/// - `a`: `A` base pointer, shape `(m, k)`.
+/// - `lda`: `A` leading dimension.
+/// - `b`: `B` base pointer, shape `(k, n)`.
+/// - `ldb`: `B` leading dimension.
+/// - `m`: shape `m`
+/// - `k`: shape `k`.
+/// - `n`: shape `n`.
+///
+/// # Safety
+///
+/// - `a`, `b`, and `c` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
+/// - `a`, `b`, and `c` do not overlap.
+/// - `a`, `b`, and `c` are 4-byte aligned.
+pub(crate) unsafe fn mul_rmn_rmk_ckn(
+    c: *mut f32,
+    ldc: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::mul_rmn_rmk_ckn_avx512(c, ldc, a, lda, b, ldb, m, k, n) };
+        }
+    }
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bj in (0..n).step_by(BLOCK_SIZE) {
+            for bk in (0..k).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+
+                for i in bi..i_end {
+                    for j in bj..j_end {
+                        let mut sum = if bk == 0 {
+                            0.0
+                        } else {
+                            unsafe { *c.add(i * ldc as usize + j) }
+                        };
+                        for k_idx in bk..k_end {
+                            unsafe {
+                                sum += (*a.add(i * lda as usize + k_idx))
+                                    * (*b.add(k_idx + j * ldb as usize))
+                            };
+                        }
+                        unsafe { *c.add(i * ldc as usize + j) = sum };
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Computes `D = A * B + c` with `c` broadcasted along m-dimension.
 ///
 /// # Parameters
 ///
 /// - `d`: `D` base pointer, shape `(m, n)`.
-/// - `rmd`: `true` if `D` is row-major.
 /// - `ldd`: `D` leading dimension.
 /// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `rma`: `true` if `A` is row-major.
 /// - `lda`: `A` leading dimension.
 /// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `rmb`: `true` if `B` is row-major.
 /// - `ldb`: `B` leading dimension.
 /// - `c`: `c` base pointer, shape `(1, n)`.
-/// - `buf`: Temporary storage for `n` `f32` values.
 /// - `m`: shape `m`
 /// - `k`: shape `k`.
 /// - `n`: shape `n`.
@@ -262,79 +431,125 @@ pub(crate) unsafe fn mul_mk_kn(
 /// # Safety
 ///
 /// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
-/// - `buf` covers at least `n` `f32` values and is 64-byte aligned.
 /// - `a`, `b`, `c`, and `d` do not overlap.
 /// - `a`, `b`, `c`, and `d` are 4-byte aligned.
-pub(crate) unsafe fn muladd_mk_kn_1n(
+pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n(
     d: *mut f32,
-    rmd: bool,
-    ldd: usize,
+    ldd: u32,
     a: *const f32,
-    rma: bool,
-    lda: usize,
+    lda: u32,
     b: *const f32,
-    rmb: bool,
-    ldb: usize,
+    ldb: u32,
     c: *const f32,
     m: usize,
     k: usize,
     n: usize,
 ) -> () {
-    match (rmd, rma, rmb) {
-        (true, true, true) => {
-            #[cfg(target_arch = "x86_64")]
-            {
-                if is_x86_feature_detected!("avx512f") {
-                    return unsafe {
-                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
-                    };
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe {
+                x86_64::mul_rmn_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
+            };
+        }
+    }
+
+    for i in 0..m {
+        for j in 0..n {
+            unsafe { *d.add(i * ldd as usize + j) = *c.add(j) };
+        }
+    }
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bk in (0..k).step_by(BLOCK_SIZE) {
+            for bj in (0..n).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+
+                for i in bi..i_end {
+                    for k_idx in bk..k_end {
+                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
+                        for j in bj..j_end {
+                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
+                            unsafe { *d.add(i * ldd as usize + j) += a_val * b_val };
+                        }
+                    }
                 }
             }
         }
-        _ => {}
     }
+}
 
-    todo!()
-    /*
-    let c_src_end = unsafe { c.add(n) };
-    let mut c_src = c as *const f32;
-    let mut c_dst = buf;
-
-    while c_src != c_src_end {
-        unsafe { *c_dst = *c_src };
-        c_src = unsafe { c_src.add(1) };
-        c_dst = unsafe { c_dst.add(1) };
-    }
-
-    // Load `b` into `c`.
-    let mut c_ptr = c;
-    let mut b_ptr = b;
-    let c_end = unsafe { c.add(n) };
-
-    while c_ptr != c_end {
-        unsafe { *c_ptr = *b_ptr };
-        c_ptr = unsafe { c_ptr.add(1) };
-        b_ptr = unsafe { b_ptr.add(1) };
-    }
-
-    // Accumulate `c += buf[ki] * a[ki, :]`.
-    let mut ki = 0usize;
-    let out_end = unsafe { c.add(n) };
-
-    while ki < k {
-        let c_scalar = unsafe { *buf.add(ki) };
-        let mut a_ptr = unsafe { a.add(ki * lda) };
-        let mut out_ptr = c;
-
-        while out_ptr != out_end {
-            unsafe { *out_ptr += c_scalar * *a_ptr };
-            out_ptr = unsafe { out_ptr.add(1) };
-            a_ptr = unsafe { a_ptr.add(1) };
+/// Computes `D = A * B + c` with `c` broadcasted along m-dimension, but `B` is column-major.
+///
+/// # Parameters
+///
+/// - `d`: `D` base pointer, shape `(m, n)`.
+/// - `ldd`: `D` leading dimension.
+/// - `a`: `A` base pointer, shape `(m, k)`.
+/// - `lda`: `A` leading dimension.
+/// - `b`: `B` base pointer, shape `(k, n)`.
+/// - `ldb`: `B` leading dimension.
+/// - `c`: `c` base pointer, shape `(1, n)`.
+/// - `m`: shape `m`
+/// - `k`: shape `k`.
+/// - `n`: shape `n`.
+///
+/// # Safety
+///
+/// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
+/// - `a`, `b`, `c`, and `d` do not overlap.
+/// - `a`, `b`, `c`, and `d` are 4-byte aligned.
+pub(crate) unsafe fn mul_rmn_rmk_ckn_r1n(
+    d: *mut f32,
+    ldd: u32,
+    a: *const f32,
+    lda: u32,
+    b: *const f32,
+    ldb: u32,
+    c: *const f32,
+    m: usize,
+    k: usize,
+    n: usize,
+) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe {
+                x86_64::mul_rmn_rmk_ckn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
+            };
         }
-
-        ki += 1;
     }
-    */
+
+    for bi in (0..m).step_by(BLOCK_SIZE) {
+        for bj in (0..n).step_by(BLOCK_SIZE) {
+            for bk in (0..k).step_by(BLOCK_SIZE) {
+                let i_end = (bi + BLOCK_SIZE).min(m);
+                let j_end = (bj + BLOCK_SIZE).min(n);
+                let k_end = (bk + BLOCK_SIZE).min(k);
+
+                for i in bi..i_end {
+                    for j in bj..j_end {
+                        let mut sum = if bk == 0 {
+                            unsafe { *c.add(j) }
+                        } else {
+                            unsafe { *d.add(i * ldd as usize + j) }
+                        };
+
+                        for k_idx in bk..k_end {
+                            unsafe {
+                                sum += (*a.add(i * lda as usize + k_idx))
+                                    * (*b.add(k_idx + j * ldb as usize))
+                            };
+                        }
+
+                        unsafe { *d.add(i * ldd as usize + j) = sum };
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

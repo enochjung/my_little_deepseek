@@ -27,6 +27,7 @@ where
         &self,
         x: &mut Tensor<E, M0>,
         tmp_1_x_d: &mut Tensor<E, M1>,
+        iter: usize,
     ) -> Result<(), crate::Error> {
         let d = self.head_size;
         let half = d / 2;
@@ -34,16 +35,20 @@ where
         let cos = self.cossin.slice(0..1, 0..half);
         let sin = self.cossin.slice(0..1, half..d);
 
-        tmp_1_x_d.copy(&x)?;
-        let tmp0 = tmp_1_x_d.slice(0..1, 0..half);
-        let tmp1 = tmp_1_x_d.slice(0..1, half..d);
+        for i in 0..iter as u32 {
+            let dst = x.slice_mut(0..1, i * d..(i + 1) * d);
 
-        let (mut x0, mut x1) = x.slice_mut(0..1, 0..self.head_size).split_col(half)?;
+            tmp_1_x_d.copy(&dst)?;
+            let tmp0 = tmp_1_x_d.slice(0..1, 0..half);
+            let tmp1 = tmp_1_x_d.slice(0..1, half..d);
 
-        x0.mul_elementwise(&x1, &sin, -1.0)?;
-        x1.mul_elementwise(&tmp1, &cos, 1.0)?;
-        x0.mul_elementwise(&tmp0, &cos, 1.0)?;
-        x1.mul_elementwise(&tmp0, &sin, 1.0)?;
+            let (mut x0, mut x1) = dst.split_col(half)?;
+
+            x0.mul_elementwise(&x1, &sin, -1.0)?;
+            x1.mul_elementwise(&tmp1, &cos, 1.0)?;
+            x0.mul_elementwise(&tmp0, &cos, 1.0)?;
+            x1.mul_elementwise(&tmp0, &sin, 1.0)?;
+        }
 
         Ok(())
     }

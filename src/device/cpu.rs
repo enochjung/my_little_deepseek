@@ -43,6 +43,7 @@ impl MutableDevice for Cpu {
 }
 impl OwnedDevice for Cpu {
     fn new(len: usize) -> Result<Self, crate::Error> {
+        let len = len.max(PAGE_SIZE).next_power_of_two();
         let ptr = new_mmap(len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
@@ -62,7 +63,7 @@ impl TryFrom<std::fs::File> for Cpu {
     fn try_from(file: std::fs::File) -> Result<Self, Self::Error> {
         let metadata = file.metadata().map_err(crate::Error::io)?;
         let fd = file.as_raw_fd();
-        let len = metadata.len() as usize;
+        let len = (metadata.len() as usize).max(PAGE_SIZE);
         let ptr = file_mmap(fd, len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
@@ -99,6 +100,11 @@ impl DeviceOps<F32> for Cpu {
                 src = unsafe { src.add(src_layout.stride as usize) };
             }
         }
+    }
+    unsafe fn argmax<D: Device<Base = Self>>(src: &D, src_layout: &Layout) -> u32 {
+        let src = unsafe { src.as_ptr().byte_add(src_layout.offset) } as *mut f32;
+        let n = src_layout.ncol as usize;
+        unsafe { kernel::argmax_n(src, n) }
     }
     unsafe fn cast_from_bf16<M: MutableDevice<Base = Self>, D0: Device<Base = Self>>(
         dst: &mut M,
@@ -170,10 +176,10 @@ impl DeviceOps<F32> for Cpu {
         let src1 = unsafe { src1.as_ptr().byte_add(src1_layout.offset) } as *const f32;
 
         if dst_layout.is_packed() && src1_layout.is_packed() {
-            let len = (dst_layout.nrow * dst_layout.ncol) as usize * F32::BYTES;
+            let len = (dst_layout.nrow * dst_layout.ncol) as usize;
             unsafe { kernel::mul_n_n(dst, src1, alpha, len) };
         } else {
-            let len = dst_layout.ncol as usize * F32::BYTES;
+            let len = dst_layout.ncol as usize;
 
             let mut dst = dst;
             let mut src1 = src1;
@@ -184,7 +190,7 @@ impl DeviceOps<F32> for Cpu {
             }
         }
     }
-    unsafe fn mul_mk_kn<
+    unsafe fn mul_mn_mk_kn<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -205,23 +211,20 @@ impl DeviceOps<F32> for Cpu {
         let b = unsafe { src1.as_ptr().byte_add(src1_layout.offset) } as *const f32;
 
         unsafe {
-            kernel::mul_mk_kn(
+            kernel::mul_rmn_rmk_rkn(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                true,
-                src1_layout.stride as usize,
+                src1_layout.stride,
                 m,
                 k,
                 n,
             )
         };
     }
-    unsafe fn mul_mk_knt<
+    unsafe fn mul_mn_mk_knt<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -242,23 +245,20 @@ impl DeviceOps<F32> for Cpu {
         let b = unsafe { src1.as_ptr().byte_add(src1_layout_t.offset) } as *const f32;
 
         unsafe {
-            kernel::mul_mk_kn(
+            kernel::mul_rmn_rmk_ckn(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                false,
-                src1_layout_t.stride as usize,
+                src1_layout_t.stride,
                 m,
                 k,
                 n,
             )
         };
     }
-    unsafe fn muladd_mk_kn_1n<
+    unsafe fn mul_mn_mk_kn_1n<
         M: MutableDevice<Base = Self>,
         D0: Device<Base = Self>,
         D1: Device<Base = Self>,
@@ -283,16 +283,52 @@ impl DeviceOps<F32> for Cpu {
         let c = unsafe { src2.as_ptr().byte_add(src2_layout.offset) } as *const f32;
 
         unsafe {
-            kernel::muladd_mk_kn_1n(
+            kernel::mul_rmn_rmk_rkn_r1n(
                 dst,
-                true,
-                dst_layout.stride as usize,
+                dst_layout.stride,
                 a,
-                true,
-                src0_layout.stride as usize,
+                src0_layout.stride,
                 b,
-                true,
-                src1_layout.stride as usize,
+                src1_layout.stride,
+                c,
+                m,
+                k,
+                n,
+            )
+        };
+    }
+    unsafe fn mul_mn_mk_knt_1n<
+        M: MutableDevice<Base = Self>,
+        D0: Device<Base = Self>,
+        D1: Device<Base = Self>,
+        D2: Device<Base = Self>,
+    >(
+        dst: &mut M,
+        dst_layout: &Layout,
+        src0: &D0,
+        src0_layout: &Layout,
+        src1: &D1,
+        src1_layout: &Layout,
+        src2: &D2,
+        src2_layout: &Layout,
+    ) -> () {
+        let m = src0_layout.nrow as usize;
+        let k = src0_layout.ncol as usize;
+        let n = src1_layout.nrow as usize;
+
+        let dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
+        let a = unsafe { src0.as_ptr().byte_add(src0_layout.offset) } as *const f32;
+        let b = unsafe { src1.as_ptr().byte_add(src1_layout.offset) } as *const f32;
+        let c = unsafe { src2.as_ptr().byte_add(src2_layout.offset) } as *const f32;
+
+        unsafe {
+            kernel::mul_rmn_rmk_ckn_r1n(
+                dst,
+                dst_layout.stride,
+                a,
+                src0_layout.stride,
+                b,
+                src1_layout.stride,
                 c,
                 m,
                 k,
@@ -341,14 +377,22 @@ impl DeviceOps<F32> for Cpu {
         unsafe { kernel::rope_sin_n(dst, n, k, theta, d) };
     }
     unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> () {
-        todo!()
+        let dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
+        let n = (dst_layout.nrow * dst_layout.ncol) as usize;
+        unsafe { kernel::silu_n(dst, n) };
     }
-    unsafe fn softmax<M: MutableDevice<Base = Self>>(
+    unsafe fn safe_softmax<M: MutableDevice<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
         alpha: f32,
     ) -> () {
-        todo!()
+        let n = dst_layout.ncol as usize;
+
+        let mut dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
+        for _ in 0..dst_layout.nrow {
+            unsafe { kernel::safe_softmax_n(dst, alpha, n) };
+            dst = unsafe { dst.add(dst_layout.stride as usize) };
+        }
     }
 }
 
