@@ -1,16 +1,16 @@
-mod model;
 mod normalizer;
 mod pretokenizer;
+mod tokenizer_model;
 
 use crate::config::{CompositionExclusionFormat, MergeFormat, UnicodeFormat, VocabFormat};
-use model::ModelEngine;
 use normalizer::Normalizer;
 use pretokenizer::Pretokenizer;
+use tokenizer_model::TokenizerModel;
 
 pub(crate) struct Tokenizer {
     normalizer: Normalizer,
     pretokenizer: Pretokenizer,
-    model_engine: ModelEngine,
+    tokenizer_model: TokenizerModel,
 }
 
 impl Tokenizer {
@@ -22,19 +22,19 @@ impl Tokenizer {
     ) -> Result<Self, crate::Error> {
         let normalizer = Normalizer::new(unicode_format, composition_exclusion_format)?;
         let pretokenizer = Pretokenizer::new();
-        let model_engine = ModelEngine::new(merge_format, vocab_format)?;
+        let tokenizer_model = TokenizerModel::new(merge_format, vocab_format)?;
 
         Ok(Self {
             normalizer,
             pretokenizer,
-            model_engine,
+            tokenizer_model,
         })
     }
 
-    pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
-        let normalized_input = self.normalizer.normalize(input)?;
-        let pretokenized_input = self.pretokenizer.pretokenize(&normalized_input);
-        let tokens = self.model_engine.encode(&pretokenized_input)?;
+    pub(crate) fn execute(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
+        let normalized_input = self.normalizer.execute(input)?;
+        let pretokenized_input = self.pretokenizer.execute(&normalized_input);
+        let tokens = self.tokenizer_model.execute(&pretokenized_input)?;
 
         Ok(tokens)
     }
@@ -82,9 +82,7 @@ mod tests {
     fn assert(input: &str, expected: &[u32]) {
         let tokenizer = get_tokenizer();
 
-        let actual = tokenizer
-            .tokenize(input)
-            .expect("tokenizing should succeed");
+        let actual = tokenizer.execute(input).expect("tokenizing should succeed");
         assert_eq!(
             actual, expected,
             "actual: {:?}, expected: {:?}",

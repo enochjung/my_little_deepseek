@@ -2,25 +2,35 @@ mod kv_cache;
 mod special_token;
 
 use crate::Model;
-use crate::storage::MmapMut;
-use crate::tensor::F32;
+use crate::device::{Device, DeviceOps, OwnedDevice};
+use crate::tensor::ElemType;
 pub(crate) use kv_cache::KVCache;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
-use std::thread::JoinHandle;
 
-pub struct Session<'a> {
-    model: &'a Model,
+#[allow(private_bounds)]
+pub struct Session<'a, E: ElemType, ED: Device, TD: Device> {
+    model: &'a Model<E, ED, TD>,
     tokens: Vec<u32>,
-    kv_caches: Vec<KVCache<F32, MmapMut>>,
+    kv_caches: Vec<KVCache<E, TD::Base>>,
 }
 
-impl<'a> Session<'a> {
+#[allow(private_bounds)]
+impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
     /// Creates a new task by appending a user prompt to this session.
     ///
-    /// The returned task starts its worker immediately.
-    pub fn send_prompt(self, user_input: &str) -> Result<SessionTask<'a>, crate::Error> {
-        // Build the prompt tokens that will be prefed into the worker.
+    /// The returned task starts automatically.
+    pub fn send_prompt<'scope>(
+        self,
+        scope: &'scope std::thread::Scope<'scope, '_>,
+        user_input: &str,
+    ) -> Result<SessionTask<'a, E, ED, TD>, crate::Error>
+    where
+        'a: 'scope,
+        ED::Base: DeviceOps<E>,
+        TD::Base: DeviceOps<E>,
+        ED: Device<Base = TD::Base>,
+    {
         let model = self.model;
         let mut tokens = self.tokens;
         let kv_caches = self.kv_caches;
@@ -30,73 +40,87 @@ impl<'a> Session<'a> {
         tokens.push(special_token::ASSISTANT);
         tokens.push(special_token::THINK_START);
 
-        Ok(SessionTask::new(model, tokens, kv_caches))
-    }
-
-    pub(crate) fn new(model: &'a Model) -> Self {
-        let tokens = vec![special_token::BEGIN_OF_SENTENCE; 1];
-        let kv_caches = (0..model.num_hidden_layers)
-            .map(|_| KVCache::new())
-            .collect();
-
-        Self {
-            model,
-            tokens,
-            kv_caches,
-        }
-    }
-}
-
-pub struct SessionTask<'a> {
-    model: &'a Model,
-    tokens: Vec<u32>,
-    worker: Option<JoinHandle<Result<Vec<KVCache<F32, MmapMut>>, crate::Error>>>,
-    abort_flag: Arc<AtomicBool>,
-    token_rx: mpsc::Receiver<u32>,
-}
-
-impl<'a> SessionTask<'a> {
-    fn new(model: &'a Model, tokens: Vec<u32>, kv_caches: Vec<KVCache<F32, MmapMut>>) -> Self {
-        let prefill_start = kv_caches[0].len().min(tokens.len());
+        let prefill_start = (kv_caches[0].n() as usize).min(tokens.len());
         let prefill_tokens = tokens[prefill_start..].to_vec();
         let abort_flag = Arc::new(AtomicBool::new(false));
+        let finished_flag = Arc::new(AtomicBool::new(false));
         let (token_tx, token_rx) = mpsc::channel();
-        let worker = Worker::spawn(
-            model,
-            prefill_tokens,
-            kv_caches,
-            Arc::clone(&abort_flag),
-            token_tx,
-        );
+        let (kv_tx, kv_rx) = mpsc::channel();
 
-        Self {
+        let abort_clone = Arc::clone(&abort_flag);
+        let finished_clone = Arc::clone(&finished_flag);
+
+        scope.spawn(move || {
+            let result = run(model, prefill_tokens, kv_caches, abort_clone, token_tx);
+            finished_clone.store(true, Ordering::Release);
+            let _ = kv_tx.send(result);
+        });
+
+        Ok(SessionTask {
             model,
             tokens,
-            worker: Some(worker),
             abort_flag,
+            finished_flag,
             token_rx,
-        }
+            kv_rx,
+        })
     }
 
+    pub(crate) fn new(model: &'a Model<E, ED, TD>) -> Result<Self, crate::Error> {
+        const INITIAL_N: usize = 1024;
+
+        let tokens = vec![special_token::BEGIN_OF_SENTENCE; 1];
+        let kv_caches = (0..model.num_hidden_layers)
+            .map(|_| {
+                let k_device = TD::Base::new(
+                    INITIAL_N * model.head_size as usize * model.num_key_value_heads * E::BYTES,
+                )?;
+                let v_device = TD::Base::new(
+                    INITIAL_N * model.head_size as usize * model.num_key_value_heads * E::BYTES,
+                )?;
+
+                KVCache::<E, _>::new(k_device, v_device, model.head_size, 0)
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self {
+            model,
+            tokens,
+            kv_caches,
+        })
+    }
+}
+
+#[allow(private_bounds)]
+pub struct SessionTask<'a, E: ElemType, ED: Device, TD: Device> {
+    model: &'a Model<E, ED, TD>,
+    tokens: Vec<u32>,
+    abort_flag: Arc<AtomicBool>,
+    finished_flag: Arc<AtomicBool>,
+    token_rx: mpsc::Receiver<u32>,
+    kv_rx: mpsc::Receiver<Result<Vec<KVCache<E, TD::Base>>, crate::Error>>,
+}
+
+#[allow(private_bounds)]
+impl<'a, E: ElemType, ED: Device, TD: Device> SessionTask<'a, E, ED, TD> {
     /// Returns true once the worker thread has stopped.
     pub fn is_finished(&self) -> bool {
-        self.worker.as_ref().is_some_and(|w| w.is_finished())
+        self.finished_flag.load(Ordering::Relaxed)
     }
 
     /// Stops background work and converts this task back into a reusable `Session`.
-    pub fn finish_decoding(mut self) -> Result<Session<'a>, crate::Error> {
+    pub fn finish_decoding(mut self) -> Result<Session<'a, E, ED, TD>, crate::Error> {
         self.abort_flag.store(true, Ordering::Relaxed);
+
         while let Ok(token_id) = self.token_rx.try_recv() {
             self.tokens.push(token_id);
         }
         let tokens = std::mem::take(&mut self.tokens);
 
         let kv_caches = self
-            .worker
-            .take()
-            .unwrap()
-            .join()
-            .expect("joining session worker should succeed")?;
+            .kv_rx
+            .recv()
+            .expect("`Receiver::recv` should succeed")?;
 
         Ok(Session {
             model: self.model,
@@ -110,20 +134,13 @@ impl<'a> SessionTask<'a> {
         // TODO: return readable string.
         let token_id = self.token_rx.try_recv().ok()?;
         self.tokens.push(token_id);
-
         Some(render_token_id(token_id))
     }
 }
 
-impl<'a> Drop for SessionTask<'a> {
+impl<'a, E: ElemType, ED: Device, TD: Device> Drop for SessionTask<'a, E, ED, TD> {
     fn drop(&mut self) {
         self.abort_flag.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            worker
-                .join()
-                .expect("joining session worker should succeed")
-                .expect("decode should succeed");
-        }
     }
 }
 
@@ -139,64 +156,40 @@ fn render_token_id(token_id: u32) -> String {
     }
 }
 
-struct Worker {
-    // SAFETY: the worker is joined before the owning SessionTask is dropped.
-    model_ptr: usize,
+fn run<'a, E: ElemType, ED: Device, TD: Device>(
+    model: &'a Model<E, ED, TD>,
     prefill_tokens: Vec<u32>,
-    kv_caches: Vec<KVCache<F32, MmapMut>>,
+    mut kv_caches: Vec<KVCache<E, TD::Base>>,
     abort_flag: Arc<AtomicBool>,
     transmitter: mpsc::Sender<u32>,
-}
-
-impl Worker {
-    fn spawn(
-        model: &Model,
-        prefill_tokens: Vec<u32>,
-        kv_caches: Vec<KVCache<F32, MmapMut>>,
-        abort_flag: Arc<AtomicBool>,
-        transmitter: mpsc::Sender<u32>,
-    ) -> JoinHandle<Result<Vec<KVCache<F32, MmapMut>>, crate::Error>> {
-        let worker = Self {
-            model_ptr: model as *const Model as usize,
-            prefill_tokens,
-            kv_caches,
-            abort_flag,
-            transmitter,
-        };
-
-        std::thread::spawn(move || worker.run())
+) -> Result<Vec<KVCache<E, TD::Base>>, crate::Error>
+where
+    ED::Base: DeviceOps<E>,
+    TD::Base: DeviceOps<E>,
+    ED: Device<Base = TD::Base>,
+{
+    let next_token = model.prefill(&mut kv_caches, &prefill_tokens)?;
+    if transmitter.send(next_token).is_err() {
+        return Ok(kv_caches);
+    }
+    if next_token == special_token::END_OF_SENTENCE {
+        return Ok(kv_caches);
     }
 
-    fn run(self) -> Result<Vec<KVCache<F32, MmapMut>>, crate::Error> {
-        let model = unsafe { &*(self.model_ptr as *const Model) };
-        let prefill_tokens = self.prefill_tokens;
-        let mut kv_cache = self.kv_caches;
-        let abort_flag = self.abort_flag;
-        let transmitter = self.transmitter;
+    let mut current_token = next_token;
+    loop {
+        if abort_flag.load(Ordering::Relaxed) {
+            return Ok(kv_caches);
+        }
 
-        let next_token = model.prefill(&prefill_tokens, &mut kv_cache)?;
-        transmitter
-            .send(next_token)
-            .expect("transmitter send should succeed");
+        let next_token = model.decode(&mut kv_caches, current_token)?;
+        if transmitter.send(next_token).is_err() {
+            return Ok(kv_caches);
+        }
         if next_token == special_token::END_OF_SENTENCE {
-            return Ok(kv_cache);
+            return Ok(kv_caches);
         }
 
-        let mut current_token = next_token;
-        loop {
-            if abort_flag.load(Ordering::Relaxed) {
-                return Ok(kv_cache);
-            }
-
-            let next_token = model.decode(current_token, &mut kv_cache)?;
-            transmitter
-                .send(next_token)
-                .expect("transmitter send should succeed");
-            if next_token == special_token::END_OF_SENTENCE {
-                return Ok(kv_cache);
-            }
-
-            current_token = next_token;
-        }
+        current_token = next_token;
     }
 }

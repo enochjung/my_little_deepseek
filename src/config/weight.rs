@@ -1,6 +1,7 @@
 use super::Format;
+use crate::device::Cpu;
 use crate::model::WeightInfo;
-use crate::storage::Mmap;
+use std::fs::File;
 
 pub enum WeightFormat {
     Safetensor { path: String },
@@ -8,13 +9,14 @@ pub enum WeightFormat {
 
 impl Format for WeightFormat {
     type Output = WeightInfo;
-    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Parser = fn(&Cpu) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
-    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Cpu, Self::Parser), crate::Error> {
         match &self {
             WeightFormat::Safetensor { path } => {
-                let file = Mmap::new(path)?;
-                Ok((file, safetensor::parse))
+                let file = File::open(path).map_err(crate::Error::io)?;
+                let storage = Cpu::try_from(file)?;
+                Ok((storage, safetensor::parse))
             }
         }
     }
@@ -22,11 +24,11 @@ impl Format for WeightFormat {
 
 mod safetensor {
     use super::WeightInfo;
-    use crate::storage::Mmap;
+    use crate::device::Cpu;
 
     const HLEN_END_OFFSET: usize = 8;
 
-    pub fn parse(file: &Mmap) -> Box<dyn Iterator<Item = WeightInfo> + '_> {
+    pub fn parse(file: &Cpu) -> Box<dyn Iterator<Item = WeightInfo> + '_> {
         let raw = file.as_slice();
 
         let (header_start, weight_start) = section_offsets(raw);

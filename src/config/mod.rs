@@ -4,7 +4,7 @@ mod unicode;
 mod vocab;
 mod weight;
 
-use crate::storage::Mmap;
+use crate::device::Cpu;
 pub use composition_exclusion::CompositionExclusionFormat;
 pub use merge::MergeFormat;
 pub use unicode::UnicodeFormat;
@@ -24,6 +24,7 @@ pub struct Configure {
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
     pub(crate) rope_theta: f32,
+    pub(crate) vocab_size: u32,
 }
 
 impl Configure {
@@ -41,6 +42,7 @@ impl Configure {
             hidden_size: 1536,
             intermediate_size: 8960,
             rope_theta: 10000.0,
+            vocab_size: 151936,
         }
     }
 
@@ -103,13 +105,18 @@ impl Configure {
         self.rope_theta = value;
         self
     }
+
+    pub fn vocab_size(mut self, value: u32) -> Self {
+        self.vocab_size = value;
+        self
+    }
 }
 
 pub(crate) trait Format {
     type Output;
-    type Parser: Fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Parser: Fn(&Cpu) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
-    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error>;
+    fn read(&self) -> Result<(Cpu, Self::Parser), crate::Error>;
 }
 
 fn parse_hex_u32(text: &[u8]) -> u32 {

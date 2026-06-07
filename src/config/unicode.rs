@@ -1,5 +1,6 @@
 use super::{Format, parse_hex_u32, parse_u8};
-use crate::storage::Mmap;
+use crate::device::Cpu;
+use std::fs::File;
 
 pub enum UnicodeFormat {
     UnicodeCharacterDatabase { path: String },
@@ -13,19 +14,20 @@ pub(crate) struct UCDLine {
 
 impl Format for UnicodeFormat {
     type Output = Result<UCDLine, crate::Error>;
-    type Parser = fn(&Mmap) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Parser = fn(&Cpu) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
-    fn read(&self) -> Result<(Mmap, Self::Parser), crate::Error> {
+    fn read(&self) -> Result<(Cpu, Self::Parser), crate::Error> {
         match &self {
             UnicodeFormat::UnicodeCharacterDatabase { path } => {
-                let file = Mmap::new(path)?;
-                Ok((file, parse_ucd))
+                let file = File::open(path).map_err(crate::Error::io)?;
+                let storage = Cpu::try_from(file)?;
+                Ok((storage, parse_ucd))
             }
         }
     }
 }
 
-fn parse_ucd(file: &Mmap) -> Box<dyn Iterator<Item = Result<UCDLine, crate::Error>> + '_> {
+fn parse_ucd(file: &Cpu) -> Box<dyn Iterator<Item = Result<UCDLine, crate::Error>> + '_> {
     let lines = file.as_slice().split(|&x| x == b'\n');
 
     let iter = lines

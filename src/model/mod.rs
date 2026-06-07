@@ -1,45 +1,54 @@
 mod attention;
-mod embedding;
-mod rms_normalizer;
+mod feed_forward;
+mod rms_norm;
 mod rope;
+mod sampling;
+mod token_embedding;
 mod tokenizer;
 
 use crate::config::{Configure, Format};
+use crate::device::{Cpu, Device, DeviceOps, MutableDevice, OwnedDevice};
 use crate::session::{KVCache, Session};
-use crate::storage::*;
-use crate::tensor::*;
+use crate::tensor::{ElemType, F32, Tensor};
 use attention::Attention;
-use embedding::Embedding;
-use rms_normalizer::RMSNormalizer;
+use feed_forward::FeedForward;
+use rms_norm::RMSNorm;
 use rope::RoPE;
+use sampling::Sampling;
 use std::collections::HashMap;
 use std::ops::Range;
+use token_embedding::TokenEmbedding;
 use tokenizer::Tokenizer;
 
-pub struct Model {
-    pub(crate) num_hidden_layers: usize,
+#[allow(private_bounds)]
+pub struct Model<E: ElemType, ED: Device, TD: Device> {
+    pub(crate) head_size: u32,
+    pub(crate) hidden_size: u32,
+    pub(crate) intermediate_size: u32,
     pub(crate) num_attention_heads: usize,
+    pub(crate) num_hidden_layers: usize,
     pub(crate) num_key_value_heads: usize,
     pub(crate) rms_norm_epsilon: f32,
-    pub(crate) hidden_size: u32,
-    pub(crate) head_size: u32,
-    pub(crate) intermediate_size: u32,
     pub(crate) rope_theta: f32,
+    pub(crate) vocab_size: u32,
 
     tokenizer: Tokenizer,
-    embedding: Embedding<F32, Mmap>,
-    attentions: Vec<Attention<F32, Mmap>>,
+    embedding: TokenEmbedding<E, ED>,
+    attentions: Vec<Attention<E, TD>>,
+    feed_forwards: Vec<FeedForward<E, TD>>,
+    sampling: Sampling<E, ED>,
 }
 
-impl Model {
+impl Model<F32, Cpu, Cpu> {
     pub fn new(configure: Configure) -> Result<Self, crate::Error> {
-        let num_hidden_layers = configure.num_hidden_layers;
-        let num_attention_heads = configure.num_attention_heads;
-        let num_key_value_heads = configure.num_key_value_heads;
-        let rms_norm_epsilon = configure.rms_norm_epsilon;
         let hidden_size = configure.hidden_size;
         let intermediate_size = configure.intermediate_size;
+        let num_attention_heads = configure.num_attention_heads;
+        let num_hidden_layers = configure.num_hidden_layers;
+        let num_key_value_heads = configure.num_key_value_heads;
+        let rms_norm_epsilon = configure.rms_norm_epsilon;
         let rope_theta = configure.rope_theta;
+        let vocab_size = configure.vocab_size;
 
         if hidden_size % num_attention_heads as u32 != 0 {
             return Err(crate::Error::configure_failed(
@@ -85,206 +94,232 @@ impl Model {
             .collect::<HashMap<_, _>>();
         let weight_info = ModelWeightInfo::new(num_hidden_layers, weight_info)?;
 
-        let embedding = Embedding::new(&weight_storage, &weight_info.embed_tokens_weight)?;
+        let embedding = TokenEmbedding::new(&weight_storage, &weight_info.embed_tokens_weight)?;
         let attentions = weight_info
             .layers
             .iter()
-            .map(|layer| Attention::new(&weight_storage, &layer.attention))
+            .map(|layer| {
+                Attention::new(
+                    &weight_storage,
+                    &layer.attention,
+                    head_size,
+                    num_attention_heads,
+                    num_key_value_heads,
+                    rms_norm_epsilon,
+                    rope_theta,
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
+        let feed_forwards = weight_info
+            .layers
+            .iter()
+            .map(|layer| {
+                FeedForward::new(
+                    &weight_storage,
+                    &layer.feed_forward,
+                    intermediate_size,
+                    rms_norm_epsilon,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let sampling = Sampling::new(
+            &weight_storage,
+            &weight_info.norm_weight,
+            &weight_info.lm_head_weight,
+            rms_norm_epsilon,
+        )?;
 
         Ok(Self {
-            num_hidden_layers,
-            num_attention_heads,
-            num_key_value_heads,
-            rms_norm_epsilon,
+            head_size,
             hidden_size,
             intermediate_size,
+            num_attention_heads,
+            num_hidden_layers,
+            num_key_value_heads,
+            rms_norm_epsilon,
             rope_theta,
-            head_size,
+            vocab_size,
 
             tokenizer,
             embedding,
             attentions,
+            feed_forwards,
+            sampling,
         })
     }
+}
 
-    pub fn new_session(&self) -> Session<'_> {
+#[allow(private_bounds)]
+impl<E: ElemType, ED: Device, TD: Device> Model<E, ED, TD> {
+    pub fn new_session(&self) -> Result<Session<'_, E, ED, TD>, crate::Error> {
         Session::new(self)
     }
 
     pub(crate) fn tokenize(&self, input: &str) -> Result<Vec<u32>, crate::Error> {
-        self.tokenizer.tokenize(input)
-    }
-
-    pub(crate) fn prefill(
-        &self,
-        tokens: &[u32],
-        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
-    ) -> Result<u32, crate::Error> {
-        // TODO: impl real prefill
-
-        let mut next_token = 0;
-        for &token in tokens {
-            next_token = self.decode(token, kv_caches)?;
-        }
-        Ok(next_token)
-    }
-
-    pub(crate) fn decode(
-        &self,
-        token: u32,
-        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
-    ) -> Result<u32, crate::Error> {
-        let mut residual = Tensor::<F32, MmapMut>::new(
-            MmapMut::new(1 * self.hidden_size as usize * F32::BYTES)?,
-            0,
-            1,
-            self.hidden_size,
-            self.hidden_size,
-            true,
-        )?;
-
-        let mut x = self.build_embedding_tensor(&[token])?;
-
-        for layer in 0..self.num_hidden_layers {
-            residual.copy(&x)?;
-            self.run_attention_block(&mut x, kv_caches, layer)?;
-            x.add(&residual)?;
-
-            residual.copy(&x)?;
-            self.run_mlp_block(&mut x, layer)?;
-            x.add(&residual)?;
-        }
-
-        let next_token = self.run_output_block(x)?;
-        Ok(next_token)
-    }
-
-    fn build_embedding_tensor(
-        &self,
-        token_ids: &[u32],
-    ) -> Result<Tensor<F32, MmapMut>, crate::Error> {
-        let size = token_ids.len() * self.hidden_size as usize * F32::BYTES;
-        let storage = MmapMut::new(size)?;
-        let mut tensor = Tensor::<F32, MmapMut>::new(
-            storage,
-            0,
-            token_ids.len() as u32,
-            self.hidden_size,
-            self.hidden_size,
-            true,
-        )?;
-
-        for i in 0..token_ids.len() {
-            let token_id = token_ids[i];
-            let embed_tensor = self.embedding.word_embed(token_id)?;
-
-            let rows = (i as u32)..(i as u32 + 1);
-            let cols = 0..self.hidden_size;
-            tensor.slice_mut(rows, cols).copy(&embed_tensor)?;
-        }
-
-        Ok(tensor)
-    }
-
-    fn run_attention_block(
-        &self,
-        x: &mut Tensor<F32, MmapMut>,
-        kv_caches: &mut Vec<KVCache<F32, MmapMut>>,
-        layer: usize,
-    ) -> Result<(), crate::Error> {
-        self.attentions[layer].run_attention(
-            x,
-            &mut kv_caches[layer],
-            self.num_attention_heads,
-            self.num_key_value_heads,
-            self.rms_norm_epsilon,
-            self.head_size,
-            self.rope_theta,
-        )
-    }
-
-    fn run_mlp_block(
-        &self,
-        x: &mut Tensor<F32, MmapMut>,
-        layer: usize,
-    ) -> Result<(), crate::Error> {
-        todo!()
-        /*
-
-           // ⑨ Post-Attention RMS Norm
-           // [Shape] norm_x_mlp: [1, 1536]
-           let norm_x_mlp = rms_norm(&x, &weights.layers[layer].post_attention_layernorm);
-
-           // ⑩ Gate & Up Projection (Qwen2는 SwiGLU를 사용)
-           // [Shape] gate_proj: [1, 8960]
-           // [Shape] up_proj: [1, 8960]
-           let gate_proj = matmul(&norm_x_mlp, &weights.layers[layer].gate_proj);
-           let up_proj = matmul(&norm_x_mlp, &weights.layers[layer].up_proj);
-
-           // ⑪ SiLU 활성화 함수 및 요소별 곱셈(Element-wise)
-           // [Shape] activated: [1, 8960]
-           let activated = elementwise_mul(&silu(&gate_proj), &up_proj);
-           //// SiLU : x / (1 + e^(-x)) (element op)
-
-           // ⑫ Down Projection
-           // [Shape] mlp_out: [1, 1536]
-           let mlp_out = matmul(&activated, &weights.layers[layer].down_proj);
-        */
-    }
-
-    fn run_output_block(&self, x: Tensor<F32, MmapMut>) -> Result<u32, crate::Error> {
-        todo!()
-        /*
-        // [Shape] final_x: [1, 1536]
-        let final_x = rms_norm(&x, &weights.norm);
-
-        // 4. LM Head (Vocabulary Projection)
-        // tie_word_embeddings이 false이므로 독립적인 가중치 사용
-        // [Shape] logits: [1, 151936]
-        let logits = matmul(&final_x, &weights.lm_head);
-
-        // 5. Sampling
-        // logits에서 가장 확률이 높은 토큰(Argmax) 또는 샘플링을 통해 다음 토큰 결정
-        let next_token = argmax(&logits);
-
-         */
-
-        // rms norm (model.norm.weight)
-        // lm head (lm_head.weight)
-        // append embedding if not finished
+        self.tokenizer.execute(input)
     }
 }
 
-fn build_tensor_f32(
-    storage_bf16: &Mmap,
+#[allow(private_bounds)]
+impl<E: ElemType, ED: Device, TD: Device> Model<E, ED, TD>
+where
+    ED::Base: DeviceOps<E>,
+    TD::Base: DeviceOps<E>,
+{
+    pub(crate) fn prefill<OD: OwnedDevice>(
+        &self,
+        kv_caches: &mut Vec<KVCache<E, OD>>,
+        tokens: &[u32],
+    ) -> Result<u32, crate::Error>
+    where
+        TD: Device<Base = OD>,
+        ED: Device<Base = OD>, // temporary
+    {
+        //todo!("impl real prefill");
+
+        let mut next_token = 0;
+
+        for &token in tokens {
+            next_token = self.decode(kv_caches, token)?;
+        }
+        Ok(next_token)
+    }
+
+    pub(crate) fn decode<OD: OwnedDevice>(
+        &self,
+        kv_caches: &mut Vec<KVCache<E, OD>>,
+        token: u32,
+    ) -> Result<u32, crate::Error>
+    where
+        TD: Device<Base = OD>,
+        ED: Device<Base = OD>, // temporary
+    {
+        let h = self.hidden_size;
+        let d = self.head_size;
+        let n1 = kv_caches[0].n() + 1;
+        let i = self.intermediate_size;
+        let v = self.vocab_size;
+
+        let mut tmp_2_x_d = Tensor::new(TD::Base::new(2 * d as usize * E::BYTES)?, 0, 2, d, d)?;
+        let mut tmp_2_x_h = Tensor::new(TD::Base::new(2 * h as usize * E::BYTES)?, 0, 2, h, h)?;
+        let mut tmp_1_x_n1 = Tensor::new(TD::Base::new(1 * n1 as usize * E::BYTES)?, 0, 1, n1, n1)?;
+        let mut tmp_3_x_i = Tensor::new(TD::Base::new(3 * i as usize * E::BYTES)?, 0, 3, i, i)?;
+        let mut tmp_1_x_v = Tensor::new(TD::Base::new(1 * v as usize * E::BYTES)?, 0, 1, v, v)?;
+
+        let mut x = Tensor::new(ED::Base::new(1 * h as usize * E::BYTES)?, 0, 1, h, h)?;
+
+        self.token_embedding(&mut x, &[token])?;
+
+        //todo!("move x from ED to TD");
+
+        self.transformer(
+            kv_caches,
+            &mut x,
+            &mut tmp_2_x_d,
+            &mut tmp_2_x_h,
+            &mut tmp_1_x_n1,
+            &mut tmp_3_x_i,
+        )?;
+        let next_token = self.sampling(x, &mut tmp_1_x_v)?;
+
+        Ok(next_token)
+    }
+
+    fn token_embedding<M0: MutableDevice<Base = ED::Base>>(
+        &self,
+        target_t_x_h: &mut Tensor<E, M0>,
+        token_ids: &[u32],
+    ) -> Result<(), crate::Error> {
+        let h = self.hidden_size;
+
+        for i in 0..token_ids.len() as u32 {
+            let embed = self.embedding.execute(token_ids[i as usize])?;
+            target_t_x_h.slice_mut(i..i + 1, 0..h).copy(&embed)?;
+        }
+
+        Ok(())
+    }
+
+    fn transformer<
+        OD: OwnedDevice,
+        M0: MutableDevice<Base = TD::Base>,
+        M1: MutableDevice<Base = TD::Base>,
+        M2: MutableDevice<Base = TD::Base>,
+        M3: MutableDevice<Base = TD::Base>,
+        M4: MutableDevice<Base = TD::Base>,
+    >(
+        &self,
+        kv_caches: &mut Vec<KVCache<E, OD>>,
+        x: &mut Tensor<E, M0>,
+        tmp_2_x_d: &mut Tensor<E, M1>,
+        tmp_2_x_h: &mut Tensor<E, M2>,
+        tmp_1_x_n1: &mut Tensor<E, M3>,
+        tmp_3_x_i: &mut Tensor<E, M4>,
+    ) -> Result<(), crate::Error>
+    where
+        TD: Device<Base = OD>,
+    {
+        let h = self.hidden_size;
+        let tmp_2_x_h = tmp_2_x_h.slice_mut(0..2, 0..h);
+        let (mut residual, mut tmp_1_x_h) = tmp_2_x_h.split_row(1)?;
+
+        for layer in 0..self.num_hidden_layers {
+            residual.copy(&x)?;
+
+            self.attentions[layer].execute(
+                &mut kv_caches[layer],
+                x,
+                tmp_2_x_d,
+                &mut tmp_1_x_h,
+                tmp_1_x_n1,
+            )?;
+
+            x.add(&residual)?;
+
+            residual.copy(&x)?;
+            self.feed_forwards[layer].execute(x, tmp_3_x_i)?;
+            x.add(&residual)?;
+        }
+
+        Ok(())
+    }
+
+    fn sampling<M0: MutableDevice<Base = ED::Base>, M1: MutableDevice<Base = ED::Base>>(
+        &self,
+        x: Tensor<E, M0>,
+        tmp_1_x_v: &mut Tensor<E, M1>,
+    ) -> Result<u32, crate::Error> {
+        self.sampling.execute(x, tmp_1_x_v)
+    }
+}
+
+fn build_casted_tensor<E: ElemType, OD: OwnedDevice + DeviceOps<E>>(
+    storage_bf16: &OD,
     weight_info_bf16: &WeightInfo,
-) -> Result<Tensor<F32, Mmap>, crate::Error> {
+) -> Result<Tensor<E, OD>, crate::Error> {
     let (nrow, ncol) = match weight_info_bf16.shape.as_slice() {
         [] => return Err(crate::Error::broken_data(0)),
         [ncol] => (1, *ncol),
         [nrow, ncol] => (*nrow, *ncol),
         _ => return Err(crate::Error::broken_data(0)),
     };
-    let tensor_bf16 = Tensor::<BF16, &Mmap>::new(
-        storage_bf16,
+    let tensor_bf16 = Tensor::new(
+        &*storage_bf16,
         weight_info_bf16.offset.start,
         nrow,
         ncol,
         ncol,
-        true,
     )?;
 
-    let mut tensor_f32 = Tensor::<F32, MmapMut>::new(
-        MmapMut::new(nrow as usize * ncol as usize * F32::BYTES)?,
+    let mut tensor_f32 = Tensor::new(
+        OD::new(nrow as usize * ncol as usize * F32::BYTES)?,
         0,
         nrow,
         ncol,
         ncol,
-        true,
     )?;
-    tensor_f32.cast(&tensor_bf16)?;
-    Ok(tensor_f32.into_readonly())
+    tensor_f32.cast_from_bf16(&tensor_bf16)?;
+    Ok(tensor_f32)
 }
 
 pub(crate) struct WeightInfo {
@@ -304,7 +339,7 @@ struct AttentionLayerWeightInfo {
     o_proj_weight: WeightInfo,
 }
 
-struct FeedforwardLayerWeightInfo {
+struct FeedForwardLayerWeightInfo {
     post_attention_layernorm_weight: WeightInfo,
     gate_proj_weight: WeightInfo,
     up_proj_weight: WeightInfo,
@@ -313,7 +348,7 @@ struct FeedforwardLayerWeightInfo {
 
 struct LayerWeightInfo {
     attention: AttentionLayerWeightInfo,
-    feedforward: FeedforwardLayerWeightInfo,
+    feed_forward: FeedForwardLayerWeightInfo,
 }
 
 struct ModelWeightInfo {
@@ -371,7 +406,7 @@ impl ModelWeightInfo {
                 )?,
             };
 
-            let feedforward = FeedforwardLayerWeightInfo {
+            let feed_forward = FeedForwardLayerWeightInfo {
                 post_attention_layernorm_weight: take_tensor(
                     &mut weight_info,
                     &format!("model.layers.{layer_idx}.post_attention_layernorm.weight"),
@@ -392,11 +427,11 @@ impl ModelWeightInfo {
 
             layers.push(LayerWeightInfo {
                 attention,
-                feedforward,
+                feed_forward,
             });
         }
 
-        if let Some((_, weight)) = weight_info.into_iter().next() {
+        if weight_info.into_iter().next().is_some() {
             return Err(crate::Error::broken_data(0));
         }
 
@@ -421,7 +456,12 @@ fn take_tensor(
 #[cfg(test)]
 mod tests {
     use super::Model;
-    use crate::config::*;
+    use crate::config::{
+        CompositionExclusionFormat, Configure, MergeFormat, UnicodeFormat, VocabFormat,
+        WeightFormat,
+    };
+    use crate::device::{Cpu, OwnedDevice};
+    use crate::tensor::{ElemType, F32, Tensor};
 
     const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
     const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
@@ -429,7 +469,7 @@ mod tests {
     const VOCAB_PATH: &'static str = "model/vocab.json";
     const WEIGHT_PATH: &'static str = "model/model.safetensors";
 
-    fn get_model() -> Model {
+    fn get_model() -> Model<F32, Cpu, Cpu> {
         let conf = Configure::new()
             .unicode_format(UnicodeFormat::UnicodeCharacterDatabase {
                 path: UNICODE_PATH.to_string(),
@@ -447,7 +487,7 @@ mod tests {
                 path: WEIGHT_PATH.to_string(),
             });
 
-        Model::new(conf).expect("initializing model should succeed")
+        Model::new(conf).expect("`Model::new` should succeed")
     }
 
     #[test]
@@ -486,9 +526,21 @@ mod tests {
         ];
 
         let model = get_model();
-        let tensor = model
-            .build_embedding_tensor(&token_ids)
-            .expect("appending embedding vectors should succeed");
+        let t = token_ids.len() as u32;
+        let h = model.hidden_size;
+
+        let mut tensor = Tensor::new(
+            Cpu::new((t * h) as usize * F32::BYTES).expect("`Cpu::new` should succeed"),
+            0,
+            t,
+            h,
+            h,
+        )
+        .expect("`Tensor::new` should succeed");
+
+        model
+            .token_embedding(&mut tensor, &token_ids)
+            .expect("`Model::token_embedding` should succeed");
 
         tensor.slice(0..4, 0..5).assert(&expected_rows);
     }

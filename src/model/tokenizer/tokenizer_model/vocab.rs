@@ -1,11 +1,11 @@
 use crate::config::{Format, VocabFormat};
 use std::collections::HashMap;
 
-pub(crate) struct VocabEngine {
+pub(crate) struct Vocab {
     vocab_map: VocabMap,
 }
 
-impl VocabEngine {
+impl Vocab {
     pub(crate) fn new(vocab_format: &VocabFormat) -> Result<Self, crate::Error> {
         let mut vocab_map = VocabMap::new();
 
@@ -21,7 +21,7 @@ impl VocabEngine {
         Ok(Self { vocab_map })
     }
 
-    pub fn tokenize(&self, word: &str) -> Result<u32, crate::Error> {
+    pub fn execute(&self, word: &str) -> Result<u32, crate::Error> {
         if self.vocab_map.get(word).is_none() {
             panic!("none. word:`{}` {:?}", word, word.as_bytes())
         }

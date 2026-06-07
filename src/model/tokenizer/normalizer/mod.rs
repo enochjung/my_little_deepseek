@@ -53,7 +53,7 @@ impl Normalizer {
         })
     }
 
-    pub(crate) fn normalize(&self, input: &str) -> Result<String, crate::Error> {
+    pub(crate) fn execute(&self, input: &str) -> Result<String, crate::Error> {
         if input.is_ascii() {
             return Ok(input.to_owned());
         }
@@ -294,7 +294,7 @@ mod tests {
         let normalizer = get_normalizer();
 
         let actual = normalizer
-            .normalize(input)
+            .execute(input)
             .expect("normalization should succeed");
         assert_eq!(
             actual,

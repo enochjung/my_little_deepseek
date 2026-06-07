@@ -276,7 +276,6 @@ pub(crate) unsafe fn muladd_mk_kn_1n(
     rmb: bool,
     ldb: usize,
     c: *const f32,
-    buf: *mut f32,
     m: usize,
     k: usize,
     n: usize,
@@ -287,7 +286,7 @@ pub(crate) unsafe fn muladd_mk_kn_1n(
             {
                 if is_x86_feature_detected!("avx512f") {
                     return unsafe {
-                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, buf, m, k, n)
+                        x86_64::muladd_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
                     };
                 }
             }

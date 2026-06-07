@@ -208,7 +208,6 @@ pub(crate) unsafe fn muladd_rmk_rkn_r1n_avx512(
     b: *const f32,
     ldb: usize,
     c: *const f32,
-    buf: *mut f32,
     m: usize,
     k: usize,
     n: usize,
