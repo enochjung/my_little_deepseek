@@ -405,10 +405,16 @@ where
         validate_shape(
             A.layout.nrow,
             A.layout.ncol,
-            self.layout.ncol,
+            self.layout.nrow,
             B.layout.nrow,
         )?;
-        validate_shape(c.layout.nrow, c.layout.ncol, 1, B.layout.ncol)?;
+        validate_shape(
+            B.layout.nrow,
+            B.layout.ncol,
+            A.layout.ncol,
+            self.layout.ncol,
+        )?;
+        validate_shape(c.layout.nrow, c.layout.ncol, 1, self.layout.ncol)?;
 
         unsafe {
             M::Base::muladd_mk_kn_1n(
