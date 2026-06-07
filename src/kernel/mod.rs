@@ -1,5 +1,41 @@
 mod x86_64;
 
+/// Returns the index of the maximum value in `x[0..n]`.
+/// Typically used in `lm_head` for greedy decoding.
+///
+/// # Safety
+///
+/// - `x` must be valid for `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// - `n > 0` to avoid undefined behavior.
+pub(crate) unsafe fn argmax_n(x: *const f32, n: usize) -> u32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::argmax_n_avx512(x, n) };
+        }
+    }
+
+    let mut max_val = unsafe { *x };
+    let mut max_idx = 0;
+
+    let mut ptr = unsafe { x.add(1) };
+    let end = unsafe { x.add(n) };
+    let mut idx = 1;
+
+    while ptr != end {
+        let val = unsafe { *ptr };
+        if val > max_val {
+            max_val = val;
+            max_idx = idx;
+        }
+        ptr = unsafe { ptr.add(1) };
+        idx += 1;
+    }
+
+    max_idx as u32
+}
+
 /// Copies `len` bytes from `src` to `dst` without allowing overlap.
 ///
 /// # Safety
@@ -141,6 +177,40 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     while ptr != end {
         let v = unsafe { *ptr };
         unsafe { *ptr = v / (1.0 + (-v).exp()) };
+        ptr = unsafe { ptr.add(1) };
+    }
+}
+
+/// Applies Softmax in place: `x[i] = exp(x[i]) / sum(exp(x)) * alpha`.
+///
+/// # Safety
+///
+/// - `x` must be valid for `n` contiguous `f32` values.
+/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+pub(crate) unsafe fn softmax_n(x: *mut f32, alpha: f32, n: usize) -> () {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            return unsafe { x86_64::softmax_n_avx512(x, alphpa, n) };
+        }
+    }
+
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+
+    let mut sum = 0.0;
+    while ptr != end {
+        let v = unsafe { *ptr };
+        let exp_v = v.exp();
+        unsafe { *ptr = exp_v };
+        sum += exp_v;
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let mut ptr = x;
+    let multiplier = alpha / sum;
+    while ptr != end {
+        unsafe { *ptr *= multiplier };
         ptr = unsafe { ptr.add(1) };
     }
 }

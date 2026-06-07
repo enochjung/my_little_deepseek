@@ -67,6 +67,7 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         src: &D0,
         src_layout: &Layout,
     ) -> ();
+    unsafe fn argmax<D: Device<Base = Self>>(src: &D, src_layout: &Layout) -> u32;
     unsafe fn cast_from_bf16<M: MutableDevice<Base = Self>, D0: Device<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,

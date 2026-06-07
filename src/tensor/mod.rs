@@ -235,6 +235,12 @@ where
         Ok(())
     }
 
+    pub(crate) fn argmax(&self) -> Result<u32, crate::Error> {
+        validate_shape(self.layout.nrow, self.layout.ncol, 1, self.layout.ncol)?;
+
+        Ok(unsafe { M::Base::argmax(&self.device, &self.layout) })
+    }
+
     pub(crate) fn cast_from_bf16<D0: Device<Base = M::Base>>(
         &mut self,
         other: &Tensor<BF16, D0>,

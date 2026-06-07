@@ -9,6 +9,61 @@ use std::arch::x86_64::*;
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn argmax_n_avx512(x: *const f32, n: usize) -> u32 {
+    let vec_end = unsafe { x.add(n & !15) };
+    let end = unsafe { x.add(n) };
+    let mut ptr = x;
+
+    let mut v_max = _mm512_set1_ps(f32::NEG_INFINITY);
+    let mut v_max_idx = _mm512_setzero_si512();
+    let mut v_curr_idx = _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    let v_step = _mm512_set1_epi32(16);
+
+    while ptr != vec_end {
+        let xv = unsafe { _mm512_loadu_ps(ptr) };
+        let mask = unsafe { _mm512_cmp_ps_mask(xv, v_max, _CMP_GT_OQ) };
+        v_max = unsafe { _mm512_mask_blend_ps(mask, v_max, xv) };
+        v_max_idx = unsafe { _mm512_mask_blend_epi32(mask, v_max_idx, v_curr_idx) };
+        v_curr_idx = unsafe { _mm512_add_epi32(v_curr_idx, v_step) };
+        ptr = unsafe { ptr.add(16) };
+    }
+
+    let mut tmp_max: [f32; 16] = [0.0; 16];
+    let mut tmp_idx: [u32; 16] = [0; 16];
+
+    unsafe { _mm512_storeu_ps(tmp_max.as_mut_ptr(), v_max) };
+    unsafe { _mm512_storeu_si512(tmp_idx.as_mut_ptr() as *mut _, v_max_idx) };
+
+    let mut global_max = f32::NEG_INFINITY;
+    let mut global_max_idx = 0;
+
+    if n >= 16 {
+        for i in 0..16 {
+            if tmp_max[i] > global_max {
+                global_max = tmp_max[i];
+                global_max_idx = tmp_idx[i];
+            } else if tmp_max[i] == global_max && tmp_idx[i] < global_max_idx {
+                global_max_idx = tmp_idx[i];
+            }
+        }
+    }
+
+    let mut curr_idx = (n & !15) as u32;
+    while ptr != end {
+        let v = unsafe { *ptr };
+        if v > global_max {
+            global_max = v;
+            global_max_idx = curr_idx;
+        }
+        ptr = unsafe { ptr.add(1) };
+        curr_idx += 1;
+    }
+
+    global_max_idx
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
 pub(crate) unsafe fn cast_bf16_to_f32_n_n_avx512(dst: *mut f32, src: *const (), n: usize) -> () {
     let vec_end = unsafe { dst.add(n & !15) };
     let dst_end = unsafe { dst.add(n) };
@@ -132,6 +187,63 @@ pub(crate) unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
     while ptr != end {
         let v = unsafe { *ptr };
         unsafe { *ptr = v / (1.0 + (-v).exp()) };
+        ptr = unsafe { ptr.add(1) };
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
+    let vec_end = unsafe { x.add(n & !15) };
+    let end = unsafe { x.add(n) };
+
+    let mut sum_vec = unsafe { _mm512_setzero_ps() };
+    let mut ptr = x;
+
+    while ptr != vec_end {
+        let v = unsafe { _mm512_loadu_ps(ptr) };
+
+        let mut tmp: [f32; 16] = [0.0; 16];
+        unsafe { _mm512_storeu_ps(tmp.as_mut_ptr(), v) };
+        for i in 0..16 {
+            tmp[i] = tmp[i].exp();
+        }
+
+        let exp_vec = unsafe { _mm512_loadu_ps(tmp.as_ptr()) };
+        unsafe { _mm512_storeu_ps(ptr, exp_vec) };
+        sum_vec = unsafe { _mm512_add_ps(sum_vec, exp_vec) };
+
+        ptr = unsafe { ptr.add(16) };
+    }
+
+    let mut tmp_sum: [f32; 16] = [0.0; 16];
+    unsafe { _mm512_storeu_ps(tmp_sum.as_mut_ptr(), sum_vec) };
+    let mut sum = 0.0;
+    for i in 0..16 {
+        sum += tmp_sum[i];
+    }
+
+    while ptr != end {
+        let v = unsafe { *ptr };
+        let exp_v = v.exp();
+        unsafe { *ptr = exp_v };
+        sum += exp_v;
+        ptr = unsafe { ptr.add(1) };
+    }
+    let multiplier = alpha / sum;
+
+    let multiplier_vec = unsafe { _mm512_set1_ps(multiplier) };
+    let mut ptr = x;
+
+    while ptr != vec_end {
+        let exp_vec = unsafe { _mm512_loadu_ps(ptr) };
+        let norm_vec = unsafe { _mm512_mul_ps(exp_vec, multiplier_vec) };
+        unsafe { _mm512_storeu_ps(ptr, norm_vec) };
+        ptr = unsafe { ptr.add(16) };
+    }
+
+    while ptr != end {
+        unsafe { *ptr *= multiplier };
         ptr = unsafe { ptr.add(1) };
     }
 }
