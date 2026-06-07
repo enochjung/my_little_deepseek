@@ -43,7 +43,7 @@ impl MutableDevice for Cpu {
 }
 impl OwnedDevice for Cpu {
     fn new(len: usize) -> Result<Self, crate::Error> {
-        let ptr = new_mmap(-1, len).map_err(crate::Error::io)?;
+        let ptr = new_mmap(len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
 
@@ -63,7 +63,7 @@ impl TryFrom<std::fs::File> for Cpu {
         let metadata = file.metadata().map_err(crate::Error::io)?;
         let fd = file.as_raw_fd();
         let len = metadata.len() as usize;
-        let ptr = new_mmap(fd, len).map_err(crate::Error::io)?;
+        let ptr = file_mmap(fd, len).map_err(crate::Error::io)?;
         Ok(Self { ptr, len })
     }
 }
@@ -90,15 +90,13 @@ impl DeviceOps<F32> for Cpu {
             unsafe { kernel::add_n_n(dst, src, n) };
         } else {
             let n = dst_layout.ncol as usize;
-            let dst_stride_bytes = dst_layout.stride as usize * F32::BYTES;
-            let src_stride_bytes = src_layout.stride as usize * F32::BYTES;
 
             let mut dst = dst;
             let mut src = src;
             for _ in 0..dst_layout.nrow {
                 unsafe { kernel::add_n_n(dst, src, n) };
-                dst = unsafe { dst.byte_add(dst_stride_bytes) };
-                src = unsafe { src.byte_add(src_stride_bytes) };
+                dst = unsafe { dst.add(dst_layout.stride as usize) };
+                src = unsafe { src.add(src_layout.stride as usize) };
             }
         }
     }
@@ -116,14 +114,13 @@ impl DeviceOps<F32> for Cpu {
             unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, n) };
         } else {
             let n = dst_layout.ncol as usize;
-            let dst_stride_bytes = dst_layout.stride as usize * F32::BYTES;
             let src_stride_bytes = src_layout.stride as usize * BF16::BYTES;
 
             let mut dst = dst;
             let mut src = src;
             for _ in 0..dst_layout.nrow {
                 unsafe { kernel::cast_bf16_to_f32_n_n(dst, src, n) };
-                dst = unsafe { dst.byte_add(dst_stride_bytes) };
+                dst = unsafe { dst.add(dst_layout.stride as usize) };
                 src = unsafe { src.byte_add(src_stride_bytes) };
             }
         }
@@ -177,15 +174,13 @@ impl DeviceOps<F32> for Cpu {
             unsafe { kernel::mul_n_n(dst, src1, alpha, len) };
         } else {
             let len = dst_layout.ncol as usize * F32::BYTES;
-            let dst_stride_bytes = dst_layout.stride as usize * F32::BYTES;
-            let src1_stride_bytes = src1_layout.stride as usize * F32::BYTES;
 
             let mut dst = dst;
             let mut src1 = src1;
             for _ in 0..dst_layout.nrow {
                 unsafe { kernel::mul_n_n(dst, src1, alpha, len) };
-                dst = unsafe { dst.byte_add(dst_stride_bytes) };
-                src1 = unsafe { src1.byte_add(src1_stride_bytes) };
+                dst = unsafe { dst.add(dst_layout.stride as usize) };
+                src1 = unsafe { src1.add(src1_layout.stride as usize) };
             }
         }
     }
@@ -320,7 +315,7 @@ impl DeviceOps<F32> for Cpu {
             let rms = unsafe { kernel::rms_n(dst as *const f32, n) };
             let scale = 1.0 / (rms + epsilon);
             unsafe { kernel::mul_n_n(dst, src, scale, n) };
-            dst = unsafe { dst.byte_add(dst_layout.stride as usize) };
+            dst = unsafe { dst.add(dst_layout.stride as usize) };
         }
     }
     unsafe fn rope_cos<M: MutableDevice<Base = Self>>(
@@ -357,7 +352,7 @@ impl DeviceOps<F32> for Cpu {
     }
 }
 
-fn new_mmap(fd: i32, len: usize) -> Result<*mut (), std::io::Error> {
+fn new_mmap(len: usize) -> Result<*mut (), std::io::Error> {
     if len == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -367,6 +362,25 @@ fn new_mmap(fd: i32, len: usize) -> Result<*mut (), std::io::Error> {
 
     let prot = libc::PROT_READ | libc::PROT_WRITE;
     let flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+    let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, -1, 0) };
+
+    if ptr == libc::MAP_FAILED {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(ptr as *mut ())
+}
+
+fn file_mmap(fd: i32, len: usize) -> Result<*mut (), std::io::Error> {
+    if len == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "len must be greater than zero",
+        ));
+    }
+
+    let prot = libc::PROT_READ | libc::PROT_WRITE;
+    let flags = libc::MAP_PRIVATE;
     let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, fd, 0) };
 
     if ptr == libc::MAP_FAILED {
@@ -382,7 +396,7 @@ fn resize_mmap(ptr: *mut (), prev_len: usize, new_len: usize) -> Result<*mut (),
         if new_len == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "mmap length must be greater than zero",
+                "len must be greater than zero",
             ));
         }
         let flags = libc::MREMAP_MAYMOVE;
@@ -398,7 +412,7 @@ fn resize_mmap(ptr: *mut (), prev_len: usize, new_len: usize) -> Result<*mut (),
         if new_len == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "mmap length must be greater than zero",
+                "len must be greater than zero",
             ));
         }
 
