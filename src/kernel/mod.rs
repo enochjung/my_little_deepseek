@@ -191,7 +191,7 @@ pub(crate) unsafe fn softmax_n(x: *mut f32, alpha: f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { x86_64::softmax_n_avx512(x, alphpa, n) };
+            return unsafe { x86_64::softmax_n_avx512(x, alpha, n) };
         }
     }
 
