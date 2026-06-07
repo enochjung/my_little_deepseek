@@ -43,6 +43,8 @@ fn main() {
     std::thread::scope(|s| {
         loop {
             print!("[User]: ");
+            std::io::stdout().flush().unwrap();
+
             let mut input = String::new();
             let bytes_read = std::io::stdin()
                 .read_line(&mut input)
@@ -56,7 +58,6 @@ fn main() {
                 break;
             }
 
-            std::io::stdout().flush().unwrap();
             println!();
 
             let mut session_task = session
