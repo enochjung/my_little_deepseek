@@ -21,10 +21,10 @@ pub(crate) unsafe fn argmax_n_avx512(x: *const f32, n: usize) -> u32 {
 
     while ptr != vec_end {
         let xv = unsafe { _mm512_loadu_ps(ptr) };
-        let mask = unsafe { _mm512_cmp_ps_mask(xv, v_max, _CMP_GT_OQ) };
-        v_max = unsafe { _mm512_mask_blend_ps(mask, v_max, xv) };
-        v_max_idx = unsafe { _mm512_mask_blend_epi32(mask, v_max_idx, v_curr_idx) };
-        v_curr_idx = unsafe { _mm512_add_epi32(v_curr_idx, v_step) };
+        let mask = _mm512_cmp_ps_mask(xv, v_max, _CMP_GT_OQ);
+        v_max = _mm512_mask_blend_ps(mask, v_max, xv);
+        v_max_idx = _mm512_mask_blend_epi32(mask, v_max_idx, v_curr_idx);
+        v_curr_idx = _mm512_add_epi32(v_curr_idx, v_step);
         ptr = unsafe { ptr.add(16) };
     }
 
@@ -197,7 +197,7 @@ pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
     let vec_end = unsafe { x.add(n & !15) };
     let end = unsafe { x.add(n) };
 
-    let mut sum_vec = unsafe { _mm512_setzero_ps() };
+    let mut sum_vec = _mm512_setzero_ps();
     let mut ptr = x;
 
     while ptr != vec_end {
@@ -211,7 +211,7 @@ pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
 
         let exp_vec = unsafe { _mm512_loadu_ps(tmp.as_ptr()) };
         unsafe { _mm512_storeu_ps(ptr, exp_vec) };
-        sum_vec = unsafe { _mm512_add_ps(sum_vec, exp_vec) };
+        sum_vec = _mm512_add_ps(sum_vec, exp_vec);
 
         ptr = unsafe { ptr.add(16) };
     }
@@ -232,12 +232,12 @@ pub(crate) unsafe fn softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
     }
     let multiplier = alpha / sum;
 
-    let multiplier_vec = unsafe { _mm512_set1_ps(multiplier) };
+    let multiplier_vec = _mm512_set1_ps(multiplier);
     let mut ptr = x;
 
     while ptr != vec_end {
         let exp_vec = unsafe { _mm512_loadu_ps(ptr) };
-        let norm_vec = unsafe { _mm512_mul_ps(exp_vec, multiplier_vec) };
+        let norm_vec = _mm512_mul_ps(exp_vec, multiplier_vec);
         unsafe { _mm512_storeu_ps(ptr, norm_vec) };
         ptr = unsafe { ptr.add(16) };
     }
@@ -264,8 +264,8 @@ pub(crate) unsafe fn rope_cos_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32
             tmp[j] = angle.cos();
         }
 
-        let out_v = _mm512_loadu_ps(tmp.as_ptr());
-        _mm512_storeu_ps(ptr, out_v);
+        let out_v = unsafe { _mm512_loadu_ps(tmp.as_ptr()) };
+        unsafe { _mm512_storeu_ps(ptr, out_v) };
 
         ptr = unsafe { ptr.add(16) };
         i += 16;
@@ -295,8 +295,8 @@ pub(crate) unsafe fn rope_sin_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32
             tmp[j] = angle.sin();
         }
 
-        let out_v = _mm512_loadu_ps(tmp.as_ptr());
-        _mm512_storeu_ps(ptr, out_v);
+        let out_v = unsafe { _mm512_loadu_ps(tmp.as_ptr()) };
+        unsafe { _mm512_storeu_ps(ptr, out_v) };
 
         ptr = unsafe { ptr.add(16) };
         i += 16;

@@ -25,10 +25,13 @@ pub struct Model<E: ElemType, ED: Device, TD: Device> {
     pub(crate) head_size: u32,
     pub(crate) hidden_size: u32,
     pub(crate) intermediate_size: u32,
+    #[allow(dead_code)]
     pub(crate) num_attention_heads: usize,
     pub(crate) num_hidden_layers: usize,
     pub(crate) num_key_value_heads: usize,
+    #[allow(dead_code)]
     pub(crate) rms_norm_epsilon: f32,
+    #[allow(dead_code)]
     pub(crate) rope_theta: f32,
     pub(crate) vocab_size: u32,
 
