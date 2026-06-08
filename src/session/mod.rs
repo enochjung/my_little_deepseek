@@ -38,9 +38,10 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
         tokens.push(special_token::USER);
         tokens.append(&mut self.model.tokenize(user_input)?);
         tokens.push(special_token::ASSISTANT);
-        tokens.push(special_token::THINK_START);
-
         let decoded_cursor = tokens.len();
+        tokens.push(special_token::THINK_START);
+        tokens.push(special_token::NEXT_LINE);
+
         let prefill_start = (kv_caches[0].n() as usize).min(tokens.len());
         let prefill_tokens = tokens[prefill_start..].to_vec();
         let abort_flag = Arc::new(AtomicBool::new(false));
@@ -144,11 +145,15 @@ where
 
     /// Returns at most one generated token id as a readable string.
     pub fn get_next_string(&mut self) -> Option<String> {
-        let token_id = self.token_rx.try_recv().ok()?;
-        self.tokens.push(token_id);
+        while let Some(token_id) = self.token_rx.try_recv().ok() {
+            self.tokens.push(token_id);
+        }
+        if self.tokens.len() <= self.decoded_cursor {
+            return None;
+        }
 
-        if let Some(special_str) = render_special_token(token_id) {
-            self.decoded_cursor = self.tokens.len();
+        if let Some(special_str) = render_special_token(self.tokens[self.decoded_cursor]) {
+            self.decoded_cursor += 1;
             return Some(special_str);
         }
 
@@ -173,12 +178,12 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Drop for SessionTask<'a, E, ED, TD
 
 fn render_special_token(token: u32) -> Option<String> {
     Some(match token {
-        special_token::BEGIN_OF_SENTENCE => "<begin_of_sentence>".to_string(),
-        special_token::USER => "<user>".to_string(),
-        special_token::ASSISTANT => "<assistant>".to_string(),
+        special_token::BEGIN_OF_SENTENCE => "<|begin_of_sentence|>".to_string(),
+        special_token::USER => "<|User|>".to_string(),
+        special_token::ASSISTANT => "<|Assistant|>".to_string(),
         special_token::THINK_START => "<think>".to_string(),
         special_token::THINK_END => "</think>".to_string(),
-        special_token::END_OF_SENTENCE => "<end_of_sentence>".to_string(),
+        special_token::END_OF_SENTENCE => "<|end_of_sentence|>".to_string(),
         _ => return None,
     })
 }
