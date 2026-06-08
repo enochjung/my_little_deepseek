@@ -39,15 +39,16 @@ where
             let dst = x.slice_mut(0..1, i * d..(i + 1) * d);
 
             tmp_1_x_d.copy(&dst)?;
-            let tmp0 = tmp_1_x_d.slice(0..1, 0..half);
-            let tmp1 = tmp_1_x_d.slice(0..1, half..d);
-
+            let tmp_1_x_d = tmp_1_x_d.slice_mut(0..1, 0..d);
             let (mut x0, mut x1) = dst.split_col(half)?;
+            let (mut tmp0, tmp1) = tmp_1_x_d.split_col(half)?;
 
-            x0.mul_elementwise(&x1, &sin, -1.0)?;
-            x1.mul_elementwise(&tmp1, &cos, 1.0)?;
             x0.mul_elementwise(&tmp0, &cos, 1.0)?;
             x1.mul_elementwise(&tmp0, &sin, 1.0)?;
+            tmp0.mul_elementwise(&tmp1, &sin, -1.0)?;
+            x0.add(&tmp0)?;
+            tmp0.mul_elementwise(&tmp1, &cos, 1.0)?;
+            x1.add(&tmp0)?;
         }
 
         Ok(())

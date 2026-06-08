@@ -1,3 +1,4 @@
+pub const NEXT_LINE: u32 = 198; // Ċ
 pub const END_OF_SENTENCE: u32 = 151643; // <｜end▁of▁sentence｜>
 pub const USER: u32 = 151644; // <｜User｜>
 pub const ASSISTANT: u32 = 151645; // <｜Assistant｜>

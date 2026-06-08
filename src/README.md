@@ -22,3 +22,28 @@ This directory contains the implementation split by responsibility.
 ## Quick Flow
 
 `config` -> `model` -> `session` -> `tensor` -> `storage` / `kernel`
+
+
+```
+[] Initializing... done!
+---------------------------------
+[User]: hello!
+
+[Assistant]: 
+<think>
+Alright, the user said "hello!" and then "hello!" again. I should respond in a friendly and welcoming manner. Maybe say hello back and offer help. Keepit simple and open-ended so they feel comfortable to ask anything.
+</think>
+
+Hello! How can I assist you today?<|end_of_sentence|>
+[User]: What's your name?
+
+[Assistant]: 
+<think>
+Okay, the user just asked, "What's your name?" I need to figure out how to respond appropriately. Since I'm an AI, I don't have a physical name, but I can provide information about me. I should keep it friendly and open-ended to encourage the user to share more. Maybe I can say something like, "I'm DeepSeek-R1, an AI assistant created exclusively by the Chinese Company DeepSeek. I'm here to help you with any questions or tasks you have in mind!" That should cover it and invite them to continue the conversation.
+</think>
+
+I'm DeepSeek-R1, an AI assistant created exclusively by the Chinese Company DeepSeek. I'm here to help you with any questions or tasks you have in mind!<|end_of_sentence|>
+[User]: /exit
+---------------------------------
+Goodbye!
+```
