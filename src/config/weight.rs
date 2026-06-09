@@ -150,7 +150,7 @@ mod safetensor {
     }
 
     fn parse_tensor_info(section: Section, additional_offset: usize) -> WeightInfo {
-        let name = str::from_utf8(section.name).unwrap().to_string();
+        let name = unsafe { std::str::from_utf8_unchecked(section.name) }.to_string();
         let mut parser = SectionIter::new(section.body);
 
         parser.next();
