@@ -20,6 +20,31 @@ use std::ops::Range;
 use token_embedding::TokenEmbedding;
 use tokenizer::Tokenizer;
 
+/// Represents the immutable, stateless neural network definition and its loaded weights.
+///
+/// Once initialized from a `Configure`, a `Model` remains constant and can be safely shared across
+/// multiple inference sessions. It manages the allocation of all temporary buffers required for the
+/// forward pass, supplying them to sub-modules as needed.
+///
+/// # Type Parameters
+///
+/// * `E`: The computational element type, determining the precision of tensor operations (e.g.,
+/// [`F32`](crate::tensor::F32) or [`BF16`](crate::tensor::BF16)).
+/// * `ED`: The Embedding Device. Specifies the physical memory location for tokenization and detokenization processes.
+/// * `TD`: The Transformer Device. Specifies where the main transformer layer computations occur.
+///
+/// Conceptually, setting `ED` to `Cpu` and `TD` to `Gpu` (when implemented) allows the embedding layer
+/// to operate on system memory while offloading heavy matrix multiplications to VRAM.
+///
+/// # Examples
+///
+/// ```no_run
+/// use my_little_deepseek::{Model, F32, Cpu, config::Configure};
+///
+/// let config = Configure::new();
+/// // Configuration paths for vocab, merges, and weights would be set here.
+/// let model: Model<F32, Cpu, Cpu> = Model::new(config).unwrap();
+/// ```
 #[allow(private_bounds)]
 pub struct Model<E: ElemType, ED: Device, TD: Device> {
     pub(crate) head_size: u32,
@@ -43,6 +68,24 @@ pub struct Model<E: ElemType, ED: Device, TD: Device> {
 }
 
 impl Model<F32, Cpu, Cpu> {
+    /// Initializes a new model architecture and maps weights into device memory.
+    ///
+    /// This function parses the provided configuration, constructs the tokenizer, and initializes
+    /// the token embeddings, attention layers, feed-forward networks, and sampling layers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`](crate::Error) if the configuration is invalid, if required files
+    /// (e.g., weights or vocabularies) cannot be read, or if there is a mismatch in architectural dimensions.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use my_little_deepseek::{Model, config::Configure};
+    ///
+    /// let config = Configure::new();
+    /// let model = Model::new(config).expect("Failed to load model weights and configuration");
+    /// ```
     pub fn new(configure: Configure) -> Result<Self, crate::Error> {
         let hidden_size = configure.hidden_size;
         let intermediate_size = configure.intermediate_size;
@@ -154,6 +197,21 @@ impl Model<F32, Cpu, Cpu> {
 
 #[allow(private_bounds)]
 impl<E: ElemType, ED: Device, TD: Device> Model<E, ED, TD> {
+    /// Creates a new, stateful inference session bound to this model.
+    ///
+    /// The resulting [`Session`] will allocate its own isolated KV Cache and maintain
+    /// a unique token history, allowing multiple independent generations to run concurrently
+    /// against the same immutable model.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use my_little_deepseek::{Model, config::Configure};
+    ///
+    /// let config = Configure::new();
+    /// let model = Model::new(config).unwrap();
+    /// let session = model.new_session().unwrap();
+    /// ```
     pub fn new_session(&self) -> Result<Session<'_, E, ED, TD>, crate::Error> {
         Session::new(self)
     }

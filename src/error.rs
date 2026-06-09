@@ -1,3 +1,9 @@
+/// The error type for operations in this library.
+///
+/// This type encapsulates all possible errors that can occur during model
+/// initialization, tensor operations, and session-based inference. It provides
+/// structured information to help debug issues related to data integrity,
+/// configuration, and resource constraints.
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
@@ -65,15 +71,24 @@ impl std::fmt::Display for Error {
     }
 }
 
+/// A list of possible error categories that can occur in the library.
 #[derive(Debug)]
 enum ErrorKind {
+    /// An error occurred during I/O operations.
     Io { err: std::io::Error },
+    /// The input data is corrupted or malformed at the specified line.
     BrokenData { line: usize },
+    /// Required data for the specified name is missing.
     DataNotProvided { name: String },
+    /// An invalid Unicode character codepoint was encountered.
     InvalidChar { codepoint: u32 },
+    /// The shape of the tensor does not match the expected dimensions.
     ShapeMismatch { expected: usize, actual: usize },
+    /// An attempt was made to access data outside the valid range.
     OutOfBound { index: usize, limit: usize },
+    /// Configuration initialization failed for the specified field.
     ConfigureFailed { field: String },
+    /// Insufficient storage space was available to accommodate the required data.
     InsufficientStorageSpace { required: usize, actual: usize },
 }
 

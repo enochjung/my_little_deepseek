@@ -5,6 +5,25 @@ use std::os::fd::AsRawFd;
 
 const PAGE_SIZE: usize = 4096;
 
+/// A hardware abstraction representing the host CPU.
+///
+/// The `Cpu` struct provides the foundational memory management and computational backend
+/// for tensor operations running on the host system. It handles allocating and mapping
+/// physical storage (e.g., memory-mapped static model weights) and dynamic state buffers
+/// (such as the KV Cache).
+///
+/// In the current architecture, it serves safely as both the Embedding Device (`ED`)
+/// and Transformer Device (`TD`).
+///
+/// # Examples
+///
+/// ```no_run
+/// use my_little_deepseek::{Cpu, Model, F32, config::Configure};
+///
+/// // Initialize a model explicitly utilizing the CPU for both embeddings and transformer layers
+/// let config = Configure::new();
+/// let model: Model<F32, Cpu, Cpu> = Model::new(config).unwrap();
+/// ```
 #[repr(C)]
 pub struct Cpu {
     ptr: *mut (),

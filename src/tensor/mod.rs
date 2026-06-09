@@ -5,10 +5,14 @@ use std::ops::Range;
 pub(crate) trait ElemType: Send + Sync {
     const BYTES: usize;
 }
+
+/// Represents the float32 computational element type.
 pub struct F32;
 impl ElemType for F32 {
     const BYTES: usize = 4;
 }
+
+/// Represents the bfloat16 computational element type.
 pub struct BF16;
 impl ElemType for BF16 {
     const BYTES: usize = 2;

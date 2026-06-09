@@ -32,7 +32,7 @@ fn main() {
             path: WEIGHT_PATH.to_string(),
         });
 
-    let model = Model::new(conf).expect("`Model::new` should succeed");
+    let model = Model::<F32, Cpu, Cpu>::new(conf).expect("`Model::new` should succeed");
     let mut session = model
         .new_session()
         .expect("`Model::new_session` should succeed");
