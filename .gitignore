@@ -1,5 +1,4 @@
 .envrc
+.github
 /target
-/model
-/test_model
-/.github
+/model/model.safetensors
