@@ -61,8 +61,8 @@ mod tests {
         let actual = model_engine.encode(input).expect("encoding should succeed");
         assert_eq!(
             actual, expected,
-            "actual:{:?}, expected:{:?}",
-            actual, expected
+            "expected:{:?}, actual:{:?}",
+            expected, actual
         );
     }
 
@@ -71,12 +71,12 @@ mod tests {
     }
 
     #[test]
-    fn case01_hello() {
+    fn hello() {
         assert(&[tok("Hello"), tok("!")], &[9707, 0]);
     }
 
     #[test]
-    fn case02_summarize() {
+    fn summarize() {
         assert(
             &[
                 tok("Summarize"),
@@ -93,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn case03_what_is_2_plus_2() {
+    fn math_question() {
         assert(
             &[
                 tok("What"),
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn case04_whitespace() {
+    fn whitespace() {
         assert(
             &[
                 tok("Whitespace"),
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn case05_emoji() {
+    fn emoji() {
         assert(
             &[
                 tok("Emoji"),
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn case06_json() {
+    fn json() {
         assert(
             &[
                 tok("Answer"),
@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn case07_list_primes() {
+    fn list_numbers() {
         assert(
             &[
                 tok("List"),
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn case08_code_tip() {
+    fn code_tip() {
         assert(
             &[
                 tok("Code"),
@@ -253,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn case09_compute() {
+    fn compute() {
         assert(
             &[
                 tok("Compute"),
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn case10_python_code() {
+    fn python_code() {
         assert(
             &[
                 tok("Code"),

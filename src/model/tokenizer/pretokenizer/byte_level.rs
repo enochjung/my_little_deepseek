@@ -37,18 +37,18 @@ mod tests {
         let actual = super::pretokenize(input);
         assert_eq!(
             actual, expected,
-            "actual: {:?}, expected: {:?}",
-            actual, expected
+            "expected: {:?}, actual: {:?}",
+            expected, actual
         );
     }
 
     #[test]
-    fn case01_hello() {
+    fn hello() {
         assert(&["Hello", "!"], &[tok("Hello"), tok("!")]);
     }
 
     #[test]
-    fn case02_summarize() {
+    fn summarize() {
         assert(
             &[
                 "Summarize",
@@ -74,7 +74,7 @@ mod tests {
     }
 
     #[test]
-    fn case03_what_is_2_plus_2() {
+    fn math_question() {
         assert(
             &["What", " is", " ", "2", " +", " ", "2", "?"],
             &[
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn case04_whitespace() {
+    fn whitespace() {
         assert(
             &[
                 "Whitespace",
@@ -137,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn case05_emoji() {
+    fn emoji() {
         assert(
             &[
                 "Emoji",
@@ -167,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn case06_json() {
+    fn json() {
         assert(
             &[
                 "Answer", " with", " JSON", ":", " {", " \"", "name", "\":", " \"", "Alice", "\",",
@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn case07_list_primes() {
+    fn list_numbers() {
         assert(
             &[
                 "List", " these", ":", " ", "2", ",", " ", "3", ",", " ", "5", ",", " ", "7", ",",
@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn case08_code_tip() {
+    fn code_tip() {
         assert(
             &[
                 "Code",
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn case09_compute() {
+    fn compute() {
         assert(
             &[
                 "Compute", ":", " ", "1", "2", "7", " *", " ", "4", "3", " =", " ", "5", "4", "6",
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn case10_python_code() {
+    fn python_code() {
         assert(
             &[
                 "Code", ":\n", "```", "python", "\n", "for", " i", " in", " range", "(", "3",

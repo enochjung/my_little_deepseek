@@ -1,37 +1,39 @@
 # 🐋 my_little_deepseek
 
-Toy implementation of **DeepSeek-R1-Distill-Qwen-1.5B** inference in pure Rust.
+A toy implementation of **DeepSeek-R1-Distill-Qwen-1.5B** inference in pure Rust.
 
-Origin model: https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+## 🎯 Project Vision & Core Constraints
 
-## Overview
+This project is uniquely focused on a single fixed inference target. To maintain simplicity and low-level control, it strictly adheres to the following core constraints:
+* **Environment:** Pure Rust with `std` and `libc` only.
+* **Scope:** Inference only, no training capabilities.
+* **Target:** Single model target with fixed architecture and config expectations.
+* **Compute Baseline:** CPU only, single core, single thread for the current baseline.
 
-This project is a Rust implementation focused on a single fixed inference target: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B.
+**Origin model:** [deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B)
 
-Core constraints:
-- Pure Rust with std and libc only.
-- Inference only, no training.
-- Single model target with fixed architecture and config expectations.
-- CPU only, single core, single thread for the current baseline.
+## 🚀 Getting Started
 
-For the module architecture and dependency flow, see [src/README.md](src/README.md).
+Because the model weights are too large, `model/model.safetensors` is not included in this repository. You must download it manually from the official DeepSeek HuggingFace repository and place it in the `model/` directory.
 
-## Current Status
+To run the engine, use release mode for optimal performance:
 
-- Model data loading for Unicode, exclusions, merges, vocab, and model.safetensors.
-- Prompt token assembly with model specific special tokens.
-- Tokenizer pipeline with normalizer, pretokenizer, and model/BPE encoding.
-
-## Roadmap
-
-- Implement embedding lookup and decoder forward pass.
-- Implement LM head and token selection loop.
-- Add runtime and latency measurement for inference steps.
-- Optimize for speed on the CPU baseline.
-- Port major matrix operations to CUDA.
-
-
+```bash
+cargo run --release
 ```
+
+## ✨ Current Status & Constraints
+
+* **Functional Inference:** The forward pass and token generation loop are complete.
+* **Environment:** Pure Rust (only `std` and `libc`).
+* **Compute:** Currently supports F32 and CPU-only single-thread execution.
+* **Unsupported:** Korean text normalization is missing and there are no plans to implement it.
+
+## 💻 Demonstration
+
+Here is an example of the actual inference output from the engine:
+
+```text
 [] Initializing... done!
 ---------------------------------
 [User]: hello!
@@ -53,32 +55,23 @@ I'm DeepSeek-R1, an AI assistant created exclusively by the Chinese Company Deep
 [User]: /exit
 ---------------------------------
 Goodbye!
-```
 
 ```
-[] Initializing... done!
----------------------------------
-[User]: What is the capital of South Korea? Be concise.
 
-[Assistant]: 
-<think>
-Okay, so I need to figure out the capital of South Korea. I remember that South Korea is a country in South Asia, and it's known for its diverse culture and history. I think the capital is a major city, but I'm not exactly sure which one. Let me try to recall or think through this.
+## 🏗️ Module Architecture
 
-First, I know that the capital of South Korea is often referred to as "Seoul." I've heard that term before, especially in the context of South Korea's political system. Seoul is the capital, and it's also the administrative center. I think it's the most populous city, so that makes sense as the capital.
+This project strictly separates the **Immutable Model** from the **Mutable Session**.
 
-I should also consider the other major cities in South Korea. There's also Pusan, which is a city in the north, and Gwangju, which is in the south. But I'm pretty sure Seoul is the main one. I remember hearing that Seoul is the economic hub of South Korea, so that's another reason why it's the capital.
+* **`config`**: Defines the model architecture and configuration metadata. Acts as a registry mapping files to the device layer.
+* **`device`**: A hardware abstraction layer for memory management (currently CPU `mmap`). Provides storage for static weights and dynamic hidden states.
+* **`kernel`**: CPU-specific, low-level SIMD-optimized math operations.
+* **`tensor`**: Provides a safe 2D view over raw device memory. Offers high-level interfaces for matrix operations.
+* **`model`**: The fixed, immutable neural network definition. It allocates necessary temporary buffers and passes them to sub-modules (`attention`, `feed_forward`, `tokenizer`, etc.).
+* **`session`**: Manages the mutable state of an inference process, including unique KV Caches and token history.
+* **`error`**: Consistent, domain-specific error handling across the entire engine.
 
-I wonder if there are any other names associated with Seoul. Maybe it's called "Korea" or "South Korea," but those are the country names, not the capital. So, the capital is definitely Seoul.
+## 🗺️ Roadmap
 
-I should also think about the geography. Seoul is located in the Yangon Bay, which is a bay in the north of South Korea. It's a large city with a lot of history and culture, which supports why it's the capital. It's also known for its modern architecture and vibrant nightlife.
-
-I don't think there are any other capitals in South Korea besides Seoul. The other cities are administrative centers, but Seoul is the administrative capital and the economic and political center. So, I'm pretty confident that Seoul is the capital.
-
-To sum up, the capital of South Korea is Seoul, which is the administrative center and the economic hub. It's also the most populous city, making it the capital. I don't think there are any other capitals in South Korea besides Seoul.
-</think>
-
-The capital of South Korea is Seoul.<|end_of_sentence|>
-[User]:  /exit
----------------------------------
-Goodbye!
-```
+* **Latency Check**: Implement execution time measurement functionality to track inference steps (essential for future optimization).
+* **CPU Multi-threading**: Add multi-thread support for CPU matrix computations.
+* **NVIDIA GPU Support**: Port major calculations to CUDA for hardware acceleration.

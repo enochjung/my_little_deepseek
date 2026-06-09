@@ -1,33 +1,19 @@
+//! Low-level `Cpu` device math operations.
+//!
+//! This module provides optimized SIMD and scalar fallback math routines
+//! for model inference, including basic BLAS-like operations and activations.
+
 mod x86_64;
 
-/// Returns the index of the maximum value in `x[0..n]`.
-/// Typically used in `lm_head` for greedy decoding.
+/// Returns the index of the maximum value in a contiguous sequence of `f32`s.
+///
+/// This is typically used in the language model head (`lm_head`) for greedy decoding.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-/// - `n > 0` to avoid undefined behavior.
-///
-///
-
-/// Finds the index of the maximum value in a contiguous sequence of `f32` values.
-///
-/// This is typically used in `lm_head` for greedy decoding.
-///
-/// # Safety
-///
-/// - `x` must be a valid pointer to an array of at least `n` contiguous `f32` values.
-/// - `x` must be properly aligned to `align_of::<f32>()` (4 bytes).
-/// - `n` must be strictly greater than `0` to avoid undefined behavior.
-///
-/// # Examples
-///
-/// ```
-/// let x = [1.0, 5.0, 3.0];
-/// let max_idx = unsafe { argmax_n(x.as_ptr(), x.len()) };
-/// assert_eq!(max_idx, 1);
-/// ```
+/// * `x` must be valid for reading `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
+/// * `n` must be greater than 0.
 pub(crate) unsafe fn argmax_n(x: *const f32, n: usize) -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
@@ -56,26 +42,25 @@ pub(crate) unsafe fn argmax_n(x: *const f32, n: usize) -> u32 {
     max_idx as u32
 }
 
-/// Copies `len` bytes from `src` to `dst` without allowing overlap.
+/// Copies `len` bytes from `src` to `dst`.
 ///
 /// # Safety
 ///
-/// - `src` must be valid for reads of `len` bytes.
-/// - `dst` must be valid for writes of `len` bytes.
-/// - Source and destination ranges must not overlap.
+/// * `src` must be valid for reading `len` contiguous bytes.
+/// * `dst` must be valid for writing `len` contiguous bytes.
+/// * `src` and `dst` must not overlap.
 pub(crate) unsafe fn copy(dst: *mut (), src: *const (), len: usize) -> () {
     unsafe { std::ptr::copy_nonoverlapping(src as *const u8, dst as *mut u8, len) };
 }
 
-/// Casts `n` BF16 values from `src` into `dst` as `f32`.
+/// Casts `n` contiguous `bfloat16` elements to `f32`.
 ///
 /// # Safety
 ///
-/// - `dst` must be valid for writes of `n` contiguous `f32` values.
-/// - `src` must be valid for reads of `n * 2` contiguous bytes.
-/// - `dst` and `src` must not overlap.
-/// - `dst` must be 64-byte aligned.
-/// - `src` may be unaligned.
+/// * `src` must be valid for reading `n * 2` contiguous bytes.
+/// * `dst` must be valid for writing `n` contiguous `f32` elements.
+/// * `src` and `dst` must be properly aligned.
+/// * `src` and `dst` must not overlap.
 pub(crate) unsafe fn cast_bf16_to_f32_n_n(dst: *mut f32, src: *const (), n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -96,13 +81,12 @@ pub(crate) unsafe fn cast_bf16_to_f32_n_n(dst: *mut f32, src: *const (), n: usiz
     }
 }
 
-/// Computes RMS of `x`.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-/// - `n > 0`.
+/// * `x` must be valid for reading `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
+/// * `n` must be greater than 0.
 pub(crate) unsafe fn rms_n(x: *const f32, n: usize) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
@@ -123,13 +107,16 @@ pub(crate) unsafe fn rms_n(x: *const f32, n: usize) -> f32 {
     (sq_sum / (n as f32)).sqrt()
 }
 
-/// Scales `y` by `alpha * x` element-wise: `y[i] *= alpha * x[i]`
+/// Scales elements of `y` by corresponding elements in `x` and a scalar `alpha`.
+///
+/// Performs the element-wise operation: `y[i] *= alpha * x[i]`.
 ///
 /// # Safety
 ///
-/// - `x` and `y` must be valid for `n` contiguous `f32` values.
-/// - `x` and `y` must not overlap in memory (restrict-like requirement).
-/// - `x` and `y` must be aligned to `align_of::<f32>()` (4 bytes).
+/// * `x` must be valid for reading `n` contiguous `f32` elements.
+/// * `y` must be valid for reading and writing `n` contiguous `f32` elements.
+/// * `x` and `y` must be properly aligned.
+/// * `x` and `y` must not overlap.
 pub(crate) unsafe fn mul_n_n(y: *mut f32, x: *const f32, alpha: f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -151,13 +138,16 @@ pub(crate) unsafe fn mul_n_n(y: *mut f32, x: *const f32, alpha: f32, n: usize) -
     }
 }
 
-/// Adds `x` into `y` element-wise: `y[i] += x[i]`.
+/// Adds elements of `x` into `y`.
+///
+/// Performs the element-wise operation: `y[i] += x[i]`.
 ///
 /// # Safety
 ///
-/// - `x` and `y` must be valid for `n` contiguous `f32` values.
-/// - `x` and `y` must not overlap in memory (restrict-like requirement).
-/// - `x` and `y` must be aligned to `align_of::<f32>()` (4 bytes).
+/// * `x` must be valid for reading `n` contiguous `f32` elements.
+/// * `y` must be valid for reading and writing `n` contiguous `f32` elements.
+/// * `x` and `y` must be properly aligned.
+/// * `x` and `y` must not overlap.
 pub(crate) unsafe fn add_n_n(y: *mut f32, x: *const f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -177,12 +167,14 @@ pub(crate) unsafe fn add_n_n(y: *mut f32, x: *const f32, n: usize) -> () {
     }
 }
 
-/// Applies SiLU in place: `x[i] = x[i] / (1 + exp(-x[i]))`.
+/// Applies the SiLU (Sigmoid Linear Unit) activation function in-place.
+///
+/// Evaluates `x[i] = x[i] / (1 + exp(-x[i]))` for each element.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
+/// * `x` must be valid for reading and writing `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
 pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -201,14 +193,15 @@ pub(crate) unsafe fn silu_n(x: *mut f32, n: usize) -> () {
     }
 }
 
-/// Applies Safe Softmax in place with masking: `x[i] = exp(alpha * (x[i] - max(x))) / sum(exp(alpha * (x - max(x))))`.
-/// Elements from `n - n_mask` to `n` are masked and set to `0.0`.
+/// Applies a numerically stable Softmax in-place with optional masking.
+///
+/// Elements in the range `[n - n_mask, n)` are masked and zeroed out.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-/// - `alpha` must be a positive number.
+/// * `x` must be valid for reading and writing `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
+/// * `alpha` must be positive.
 pub(crate) unsafe fn safe_softmax_with_masking_n(
     x: *mut f32,
     alpha: f32,
@@ -271,14 +264,13 @@ pub(crate) unsafe fn safe_softmax_with_masking_n(
     }
 }
 
-/// Fills `x[0..n]` with RoPE cosine factors computed as:
-/// `cos(k / (theta^(2 * i / d)))` for `i` in `0..n`.
+/// Populates the sequence with Rotary Positional Embedding (RoPE) cosine factors.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for writes of `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-/// - `theta` and `d` should be positive to avoid undefined behavior in the power.
+/// * `x` must be valid for writing `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
+/// * `theta` and `d` must be positive.
 pub(crate) unsafe fn rope_cos_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -299,14 +291,13 @@ pub(crate) unsafe fn rope_cos_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f3
     }
 }
 
-/// Fills `x[0..n]` with RoPE sine factors computed as:
-/// `sin(k / (theta^(2 * i / d)))` for `i` in `0..n`.
+/// Populates the sequence with Rotary Positional Embedding (RoPE) sine factors.
 ///
 /// # Safety
 ///
-/// - `x` must be valid for writes of `n` contiguous `f32` values.
-/// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
-/// - `theta` and `d` should be positive to avoid undefined behavior in the power.
+/// * `x` must be valid for writing `n` contiguous `f32` elements.
+/// * `x` must be properly aligned.
+/// * `theta` and `d` must be positive.
 pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f32) -> () {
     #[cfg(target_arch = "x86_64")]
     {
@@ -329,25 +320,13 @@ pub(crate) unsafe fn rope_sin_n(x: *mut f32, n: usize, k: f32, theta: f32, d: f3
 
 const BLOCK_SIZE: usize = 64;
 
-/// Computes `C = A * B`
-///
-/// # Parameters
-///
-/// - `c`: `C` base pointer, shape `(m, n)`.
-/// - `ldc`: `C` leading dimension.
-/// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `ldb`: `B` leading dimension.
-/// - `m`: shape `m`
-/// - `k`: shape `k`.
-/// - `n`: shape `n`.
+/// Computes the matrix multiplication `C = A * B` (all matrices row-major).
 ///
 /// # Safety
 ///
-/// - `a`, `b`, and `c` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
-/// - `a`, `b`, and `c` do not overlap.
-/// - `a`, `b`, and `c` are 4-byte aligned.
+/// * `a`, `b`, and `c` must be valid for reading and writing over the dimensions specified by `m`, `k`, `n` and their respective strides.
+/// * `a`, `b`, and `c` must be properly aligned.
+/// * `a`, `b`, and `c` must not overlap.
 pub(crate) unsafe fn mul_rmn_rmk_rkn(
     c: *mut f32,
     ldc: u32,
@@ -393,25 +372,13 @@ pub(crate) unsafe fn mul_rmn_rmk_rkn(
     }
 }
 
-/// Computes `C = A * B`, but `B` is column-major.
-///
-/// # Parameters
-///
-/// - `c`: `C` base pointer, shape `(m, n)`.
-/// - `ldc`: `C` leading dimension.
-/// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `ldb`: `B` leading dimension.
-/// - `m`: shape `m`
-/// - `k`: shape `k`.
-/// - `n`: shape `n`.
+/// Computes the matrix multiplication `C = A * B` where `B` is column-major.
 ///
 /// # Safety
 ///
-/// - `a`, `b`, and `c` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
-/// - `a`, `b`, and `c` do not overlap.
-/// - `a`, `b`, and `c` are 4-byte aligned.
+/// * `a`, `b`, and `c` must be valid for reading and writing over the dimensions specified by `m`, `k`, `n` and their respective strides.
+/// * `a`, `b`, and `c` must be properly aligned.
+/// * `a`, `b`, and `c` must not overlap.
 pub(crate) unsafe fn mul_rmn_rmk_ckn(
     c: *mut f32,
     ldc: u32,
@@ -458,26 +425,16 @@ pub(crate) unsafe fn mul_rmn_rmk_ckn(
     }
 }
 
-/// Computes `D = A * B + c` with `c` broadcasted along m-dimension, but `B` is column-major.
+/// Computes the matrix multiplication `D = A * B + c` with a row-broadcasted bias.
 ///
-/// # Parameters
-///
-/// - `d`: `D` base pointer, shape `(m, n)`.
-/// - `ldd`: `D` leading dimension.
-/// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `ldb`: `B` leading dimension.
-/// - `c`: `c` base pointer, shape `(1, n)`.
-/// - `m`: shape `m`
-/// - `k`: shape `k`.
-/// - `n`: shape `n`.
+/// The matrix `B` is assumed to be column-major. The bias `c` has shape `(1, n)`
+/// and is broadcasted across the `m` dimension.
 ///
 /// # Safety
 ///
-/// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
-/// - `a`, `b`, `c`, and `d` do not overlap.
-/// - `a`, `b`, `c`, and `d` are 4-byte aligned.
+/// * `a`, `b`, `c`, and `d` must be valid for reading and writing over the dimensions specified by `m`, `k`, `n` and their respective strides.
+/// * `a`, `b`, `c`, and `d` must be properly aligned.
+/// * `a`, `b`, `c`, and `d` must not overlap.
 pub(crate) unsafe fn mul_rmn_rmk_ckn_r1n(
     d: *mut f32,
     ldd: u32,
@@ -533,76 +490,450 @@ pub(crate) unsafe fn mul_rmn_rmk_ckn_r1n(
 mod tests {
     use super::*;
 
+    fn assert(actual: &[f32], expected: &[f32]) {
+        assert_eq!(actual.len(), expected.len(), "illegal test data");
+        for (i, (a, e)) in actual.iter().zip(expected.iter()).enumerate() {
+            assert!(
+                (a - e).abs() < 1e-5,
+                "data[{}] mismatch: expected {}, actual {}",
+                i,
+                e,
+                a,
+            );
+        }
+    }
+
     #[test]
-    fn case01_rms_n5() {
+    fn argmax_n5() {
+        let x = [1.0f32, 5.0, 3.0, 2.0, 4.0];
+        let actual = unsafe { argmax_n(x.as_ptr(), x.len()) };
+        assert_eq!(actual, 1);
+    }
+
+    #[test]
+    fn argmax_n20() {
+        let mut x = [0.0f32; 20];
+        for i in 0..20 {
+            x[i] = i as f32;
+        }
+        x[15] = 99.0;
+        let actual = unsafe { argmax_n(x.as_ptr(), x.len()) };
+        assert_eq!(actual, 15);
+    }
+
+    #[test]
+    fn copy_n5() {
+        let src = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let mut dst = [0.0f32; 5];
+        unsafe {
+            copy(
+                dst.as_mut_ptr() as *mut (),
+                src.as_ptr() as *const (),
+                5 * std::mem::size_of::<f32>(),
+            )
+        };
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn copy_n20() {
+        let mut src = [0.0f32; 20];
+        for i in 0..20 {
+            src[i] = i as f32;
+        }
+        let mut dst = [0.0f32; 20];
+        unsafe {
+            copy(
+                dst.as_mut_ptr() as *mut (),
+                src.as_ptr() as *const (),
+                20 * std::mem::size_of::<f32>(),
+            )
+        };
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn cast_bf16_to_f32_n_n5() {
+        let f32_vals = [1.0f32, -2.5, 3.3, 4.125, -5.0];
+        let mut bf16_vals = [0u16; 5];
+        for i in 0..5 {
+            bf16_vals[i] = (f32_vals[i].to_bits() >> 16) as u16;
+        }
+        let mut dst = [0.0f32; 5];
+        unsafe { cast_bf16_to_f32_n_n(dst.as_mut_ptr(), bf16_vals.as_ptr() as *const (), 5) };
+
+        for i in 0..5 {
+            let expected = f32::from_bits((bf16_vals[i] as u32) << 16);
+            assert_eq!(dst[i], expected);
+        }
+    }
+
+    #[test]
+    fn cast_bf16_to_f32_n_n20() {
+        let mut bf16_vals = [0u16; 20];
+        for i in 0..20 {
+            let val = i as f32 * 1.5;
+            bf16_vals[i] = (val.to_bits() >> 16) as u16;
+        }
+        let mut dst = [0.0f32; 20];
+        unsafe { cast_bf16_to_f32_n_n(dst.as_mut_ptr(), bf16_vals.as_ptr() as *const (), 20) };
+
+        for i in 0..20 {
+            let expected = f32::from_bits((bf16_vals[i] as u32) << 16);
+            assert_eq!(dst[i], expected);
+        }
+    }
+
+    #[test]
+    fn rms_n5() {
         let x = [1.0f32, 2.0, 3.0, 4.0, 5.0];
         let actual = unsafe { rms_n(x.as_ptr(), x.len()) };
-        let expected = (11.0f32).sqrt();
-        assert!((actual - expected).abs() < 1e-6);
+        let expected = (55.0f32 / 5.0).sqrt();
+        assert!((actual - expected).abs() < 1e-5);
     }
 
     #[test]
-    fn case02_rms_n16() {
-        let x: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-        ];
+    fn rms_n20() {
+        let mut x = [0.0f32; 20];
+        let mut sq_sum = 0.0;
+        for i in 0..20 {
+            let val = (i + 1) as f32;
+            x[i] = val;
+            sq_sum += val * val;
+        }
         let actual = unsafe { rms_n(x.as_ptr(), x.len()) };
-        let expected = (93.5f32).sqrt();
-        assert!((actual - expected).abs() < 1e-6);
+        let expected = (sq_sum / 20.0).sqrt();
+        assert!((actual - expected).abs() < 1e-5);
     }
 
     #[test]
-    fn case03_mul_n5() {
+    fn mul_n_n5() {
         let x = [2.0f32, 4.0, 6.0, 8.0, 10.0];
         let mut y = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-
-        unsafe { mul_n_n(y.as_mut_ptr(), x.as_ptr(), 0.5, x.len()) };
+        unsafe { mul_n_n(y.as_mut_ptr(), x.as_ptr(), 0.5, 5) };
 
         let expected = [1.0f32, 4.0, 9.0, 16.0, 25.0];
-        for i in 0..y.len() {
-            assert!((y[i] - expected[i]).abs() < 1e-6);
-        }
+        assert(&y, &expected);
     }
 
     #[test]
-    fn case04_mul_n16() {
-        let x: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-        ];
-        let mut y = [1.0f32; 16];
-
-        unsafe { mul_n_n(y.as_mut_ptr(), x.as_ptr(), 2.0, x.len()) };
-
-        let expected: [f32; 16] = [
-            2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0,
-            32.0,
-        ];
-        for i in 0..y.len() {
-            assert!((y[i] - expected[i]).abs() < 1e-6);
+    fn mul_n_n20() {
+        let mut x = [0.0f32; 20];
+        let mut y = [1.0f32; 20];
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            x[i] = (i + 1) as f32;
+            expected[i] = x[i] * 2.0;
         }
+        unsafe { mul_n_n(y.as_mut_ptr(), x.as_ptr(), 2.0, 20) };
+        assert(&y, &expected);
     }
 
     #[test]
-    fn case05_rope_cos_n5() {
+    fn add_n_n5() {
+        let x = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let mut y = [5.0f32, 4.0, 3.0, 2.0, 1.0];
+        unsafe { add_n_n(y.as_mut_ptr(), x.as_ptr(), 5) };
+
+        let expected = [6.0f32; 5];
+        assert(&y, &expected);
+    }
+
+    #[test]
+    fn add_n_n20() {
+        let mut x = [0.0f32; 20];
+        let mut y = [0.0f32; 20];
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            x[i] = i as f32;
+            y[i] = (i * 2) as f32;
+            expected[i] = x[i] + y[i];
+        }
+        unsafe { add_n_n(y.as_mut_ptr(), x.as_ptr(), 20) };
+        assert(&y, &expected);
+    }
+
+    #[test]
+    fn silu_n5() {
+        let mut x = [-2.0f32, -1.0, 0.0, 1.0, 2.0];
+        let mut expected = [0.0f32; 5];
+        for i in 0..5 {
+            expected[i] = x[i] / (1.0 + (-x[i]).exp());
+        }
+        unsafe { silu_n(x.as_mut_ptr(), 5) };
+        assert(&x, &expected);
+    }
+
+    #[test]
+    fn silu_n20() {
+        let mut x = [0.0f32; 20];
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            let val = (i as f32) - 10.0;
+            x[i] = val;
+            expected[i] = val / (1.0 + (-val).exp());
+        }
+        unsafe { silu_n(x.as_mut_ptr(), 20) };
+        assert(&x, &expected);
+    }
+
+    #[test]
+    fn safe_softmax_with_masking_n5() {
+        let mut x = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let alpha = 1.0;
+        let mut expected = [0.0f32; 5];
+        let max_val = 3.0;
+
+        let sum = (1.0f32 - max_val).exp() + (2.0f32 - max_val).exp() + (3.0f32 - max_val).exp();
+        expected[0] = (1.0f32 - max_val).exp() / sum;
+        expected[1] = (2.0f32 - max_val).exp() / sum;
+        expected[2] = (3.0f32 - max_val).exp() / sum;
+
+        unsafe { safe_softmax_with_masking_n(x.as_mut_ptr(), alpha, 2, 5) };
+        assert(&x, &expected);
+    }
+
+    #[test]
+    fn safe_softmax_with_masking_n20() {
+        let mut x = [0.0f32; 20];
+        for i in 0..20 {
+            x[i] = i as f32;
+        }
+        let alpha = 0.5;
+        let n_mask = 5;
+        let max_val = 14.0;
+        let mut expected = [0.0f32; 20];
+        let mut sum = 0.0;
+
+        for i in 0..15 {
+            sum += (alpha * (i as f32 - max_val)).exp();
+        }
+        for i in 0..15 {
+            expected[i] = (alpha * (i as f32 - max_val)).exp() / sum;
+        }
+
+        unsafe { safe_softmax_with_masking_n(x.as_mut_ptr(), alpha, n_mask, 20) };
+        assert(&x, &expected);
+    }
+
+    #[test]
+    fn rope_cos_n5() {
         let mut buf = [0.0f32; 5];
-        unsafe { rope_cos_n(buf.as_mut_ptr(), 5, 3.0, 10000.0, 128.0) };
+        let (k, theta, d) = (3.0, 10000.0, 128.0);
+        unsafe { rope_cos_n(buf.as_mut_ptr(), 5, k, theta, d) };
 
-        for i in 0..5usize {
-            let angle = 3.0f32 / 10000.0f32.powf(2.0 * (i as f32) / 128.0);
-            let expected = angle.cos();
-            assert!((buf[i] - expected).abs() < 1e-6);
+        let mut expected = [0.0f32; 5];
+        for i in 0..5 {
+            expected[i] = (k / theta.powf(2.0 * (i as f32) / d)).cos();
         }
+        assert(&buf, &expected);
     }
 
     #[test]
-    fn case06_rope_sin_n5() {
-        let mut buf = [0.0f32; 5];
-        unsafe { rope_sin_n(buf.as_mut_ptr(), 5, 3.0, 10000.0, 128.0) };
+    fn rope_cos_n20() {
+        let mut buf = [0.0f32; 20];
+        let (k, theta, d) = (1.5, 10000.0, 64.0);
+        unsafe { rope_cos_n(buf.as_mut_ptr(), 20, k, theta, d) };
 
-        for i in 0..5usize {
-            let angle = 3.0f32 / 10000.0f32.powf(2.0 * (i as f32) / 128.0);
-            let expected = angle.sin();
-            assert!((buf[i] - expected).abs() < 1e-6);
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            expected[i] = (k / theta.powf(2.0 * (i as f32) / d)).cos();
         }
+        assert(&buf, &expected);
+    }
+
+    #[test]
+    fn rope_sin_n5() {
+        let mut buf = [0.0f32; 5];
+        let (k, theta, d) = (3.0, 10000.0, 128.0);
+        unsafe { rope_sin_n(buf.as_mut_ptr(), 5, k, theta, d) };
+
+        let mut expected = [0.0f32; 5];
+        for i in 0..5 {
+            expected[i] = (k / theta.powf(2.0 * (i as f32) / d)).sin();
+        }
+        assert(&buf, &expected);
+    }
+
+    #[test]
+    fn rope_sin_n20() {
+        let mut buf = [0.0f32; 20];
+        let (k, theta, d) = (1.5, 10000.0, 64.0);
+        unsafe { rope_sin_n(buf.as_mut_ptr(), 20, k, theta, d) };
+
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            expected[i] = (k / theta.powf(2.0 * (i as f32) / d)).sin();
+        }
+        assert(&buf, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_rkn_n5() {
+        let (m, k, n) = (1, 2, 5);
+        let a = [1.0f32, 2.0];
+        let b = [1.0, 2.0, 3.0, 4.0, 5.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let mut c = [0.0f32; 5];
+        unsafe {
+            mul_rmn_rmk_rkn(
+                c.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                n as u32,
+                m,
+                k,
+                n,
+            )
+        };
+
+        let expected = [5.0f32, 8.0, 11.0, 14.0, 17.0];
+        assert(&c, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_rkn_n20() {
+        let (m, k, n) = (1, 2, 20);
+        let a = [1.0f32, 2.0];
+        let mut b = [0.0f32; 40];
+        for i in 0..20 {
+            b[i] = i as f32;
+            b[i + 20] = (i + 1) as f32;
+        }
+        let mut c = [0.0f32; 20];
+        unsafe {
+            mul_rmn_rmk_rkn(
+                c.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                n as u32,
+                m,
+                k,
+                n,
+            )
+        };
+
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            expected[i] = 1.0 * b[i] + 2.0 * b[i + 20];
+        }
+        assert(&c, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_ckn_n5() {
+        let (m, k, n) = (1, 2, 5);
+        let a = [1.0f32, 2.0];
+        let b = [1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0];
+        let mut c = [0.0f32; 5];
+        unsafe {
+            mul_rmn_rmk_ckn(
+                c.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                k as u32,
+                m,
+                k,
+                n,
+            )
+        };
+
+        let expected = [5.0f32, 8.0, 11.0, 14.0, 17.0];
+        assert(&c, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_ckn_n20() {
+        let (m, k, n) = (1, 2, 20);
+        let a = [1.0f32, 2.0];
+        let mut b = [0.0f32; 40];
+        for i in 0..20 {
+            b[i * 2] = i as f32;
+            b[i * 2 + 1] = (i + 1) as f32;
+        }
+        let mut c = [0.0f32; 20];
+        unsafe {
+            mul_rmn_rmk_ckn(
+                c.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                k as u32,
+                m,
+                k,
+                n,
+            )
+        };
+
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            expected[i] = 1.0 * b[i * 2] + 2.0 * b[i * 2 + 1];
+        }
+        assert(&c, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_ckn_r1n_n5() {
+        let (m, k, n) = (1, 2, 5);
+        let a = [1.0f32, 2.0];
+        let b = [1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0, 6.0];
+        let bias = [0.5f32, 0.5, 0.5, 0.5, 0.5];
+        let mut d = [0.0f32; 5];
+        unsafe {
+            mul_rmn_rmk_ckn_r1n(
+                d.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                k as u32,
+                bias.as_ptr(),
+                m,
+                k,
+                n,
+            )
+        };
+
+        let expected = [5.5f32, 8.5, 11.5, 14.5, 17.5];
+        assert(&d, &expected);
+    }
+
+    #[test]
+    fn mul_rmn_rmk_ckn_r1n_n20() {
+        let (m, k, n) = (1, 2, 20);
+        let a = [1.0f32, 2.0];
+        let mut b = [0.0f32; 40];
+        for i in 0..20 {
+            b[i * 2] = i as f32;
+            b[i * 2 + 1] = (i + 1) as f32;
+        }
+        let bias = [0.5f32; 20];
+        let mut d = [0.0f32; 20];
+        unsafe {
+            mul_rmn_rmk_ckn_r1n(
+                d.as_mut_ptr(),
+                n as u32,
+                a.as_ptr(),
+                k as u32,
+                b.as_ptr(),
+                k as u32,
+                bias.as_ptr(),
+                m,
+                k,
+                n,
+            )
+        };
+
+        let mut expected = [0.0f32; 20];
+        for i in 0..20 {
+            expected[i] = 1.0 * b[i * 2] + 2.0 * b[i * 2 + 1] + 0.5;
+        }
+        assert(&d, &expected);
     }
 }

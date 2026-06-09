@@ -8,6 +8,21 @@ pub(crate) use kv_cache::KVCache;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
+/// Manages the mutable, evolving state of an active inference process.
+///
+/// While a [`Model`] acts as the static, immutable blueprint, a `Session` holds the contextual memory
+/// required for text generation, primarily consisting of the dynamic KV Cache and the
+/// historical sequence of processed tokens.
+///
+/// # Examples
+///
+/// ```no_run
+/// use my_little_deepseek::{Model, Session, config::Configure};
+///
+/// let config = Configure::new();
+/// let model = Model::new(config).unwrap();
+/// let mut session = model.new_session().unwrap();
+/// ```
 #[allow(private_bounds)]
 pub struct Session<'a, E: ElemType, ED: Device, TD: Device> {
     model: &'a Model<E, ED, TD>,
@@ -17,9 +32,25 @@ pub struct Session<'a, E: ElemType, ED: Device, TD: Device> {
 
 #[allow(private_bounds)]
 impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
-    /// Creates a new task by appending a user prompt to this session.
+    /// Initiates a background text generation task for the given user prompt.
     ///
-    /// The returned task starts automatically.
+    /// This method appends the prompt to the session's token history, applies the necessary
+    /// special chat template tokens, and spawns a worker thread within the provided scope.
+    /// It consumes the `Session` and returns a [`SessionTask`] used to stream the asynchronous output.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use my_little_deepseek::{Model, config::Configure};
+    ///
+    /// let config = Configure::new();
+    /// let model = Model::new(config).unwrap();
+    /// let session = model.new_session().unwrap();
+    ///
+    /// std::thread::scope(|s| {
+    ///     let task = session.send_prompt(s, "Explain quantum computing").unwrap();
+    /// });
+    /// ```
     pub fn send_prompt<'scope>(
         self,
         scope: &'scope std::thread::Scope<'scope, '_>,
@@ -100,6 +131,35 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Session<'a, E, ED, TD> {
     }
 }
 
+/// An asynchronous handle representing an ongoing inference computation.
+///
+/// A `SessionTask` streams generated tokens from a background worker thread. It maintains the
+/// decoding cursor to ensure valid UTF-8 strings are yielded as the neural network predicts
+/// subsequent byte-level tokens.
+///
+/// # Examples
+///
+/// ```no_run
+/// use my_little_deepseek::{Model, config::Configure};
+/// use std::time::Duration;
+///
+/// let config = Configure::new();
+/// let model = Model::new(config).unwrap();
+/// let session = model.new_session().unwrap();
+///
+/// std::thread::scope(|s| {
+///     let mut task = session.send_prompt(s, "Hello!").unwrap();
+///     
+///     while !task.is_finished() {
+///         while let Some(text) = task.get_next_string() {
+///             print!("{text}");
+///         }
+///         std::thread::sleep(Duration::from_millis(50));
+///     }
+///     
+///     let _session = task.finish_decoding().unwrap();
+/// });
+/// ```
 #[allow(private_bounds)]
 pub struct SessionTask<'a, E: ElemType, ED: Device, TD: Device> {
     model: &'a Model<E, ED, TD>,
@@ -117,12 +177,48 @@ where
     ED::Base: DeviceOps<E>,
     TD::Base: DeviceOps<E>,
 {
-    /// Returns true once the worker thread has stopped.
+    /// Returns `true` if the background generation thread has completed its execution.
+    ///
+    /// This occurs when the model emits a stop token, reaches the maximum sequence length,
+    /// or if the generation is manually aborted.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use my_little_deepseek::{Model, config::Configure};
+    /// # let config = Configure::new();
+    /// # let model = Model::new(config).unwrap();
+    /// # let session = model.new_session().unwrap();
+    /// # std::thread::scope(|s| {
+    /// # let task = session.send_prompt(s, "Hi").unwrap();
+    /// if task.is_finished() {
+    ///     println!("Generation complete!");
+    /// }
+    /// # });
+    /// ```
     pub fn is_finished(&self) -> bool {
         self.finished_flag.load(Ordering::Relaxed)
     }
 
-    /// Stops background work and converts this task back into a reusable `Session`.
+    /// Aborts any ongoing computation and reclaims the underlying `Session`.
+    ///
+    /// This method gracefully halts the worker thread, synchronizes the KV Caches,
+    /// and flushes any pending tokens into the history. The returned [`Session`] can then be reused
+    /// for subsequent prompts, maintaining the conversational context.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use my_little_deepseek::{Model, config::Configure};
+    /// # let config = Configure::new();
+    /// # let model = Model::new(config).unwrap();
+    /// # let session = model.new_session().unwrap();
+    /// # std::thread::scope(|s| {
+    /// # let task = session.send_prompt(s, "Hi").unwrap();
+    /// // Interrupt or finish the current task
+    /// let session = task.finish_decoding().unwrap();
+    /// # });
+    /// ```
     pub fn finish_decoding(mut self) -> Result<Session<'a, E, ED, TD>, crate::Error> {
         self.abort_flag.store(true, Ordering::Relaxed);
 
@@ -143,7 +239,30 @@ where
         })
     }
 
-    /// Returns at most one generated token id as a readable string.
+    /// Attempts to retrieve the next chunk of decoded text from the generator.
+    ///
+    /// Because the model operates on Byte-Pair Encoding, a single generated token might not
+    /// represent a complete, valid UTF-8 character. This method buffers raw tokens internally and
+    /// only yields a `String` when a valid character boundary is resolved.
+    ///
+    /// Returns `None` if the generator has not yet produced enough tokens to surpass the
+    /// internal decoding cursor, or an empty `String` if the accumulated tokens do not yet
+    /// form a complete character.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use my_little_deepseek::{Model, config::Configure};
+    /// # let config = Configure::new();
+    /// # let model = Model::new(config).unwrap();
+    /// # let session = model.new_session().unwrap();
+    /// # std::thread::scope(|s| {
+    /// # let mut task = session.send_prompt(s, "Hi").unwrap();
+    /// if let Some(text) = task.get_next_string() {
+    ///     print!("{}", text);
+    /// }
+    /// # });
+    /// ```
     pub fn get_next_string(&mut self) -> Option<String> {
         while let Some(token_id) = self.token_rx.try_recv().ok() {
             self.tokens.push(token_id);
@@ -178,12 +297,28 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Drop for SessionTask<'a, E, ED, TD
 
 fn render_special_token(token: u32) -> Option<String> {
     Some(match token {
-        special_token::BEGIN_OF_SENTENCE => "<|begin_of_sentence|>".to_string(),
+        special_token::END_OF_SENTENCE => "<|end_of_sentence|>".to_string(),
         special_token::USER => "<|User|>".to_string(),
         special_token::ASSISTANT => "<|Assistant|>".to_string(),
+        special_token::BEGIN_OF_SENTENCE => "<|begin_of_sentence|>".to_string(),
+        special_token::EOT => "<|EOT|>".to_string(),
         special_token::THINK_START => "<think>".to_string(),
         special_token::THINK_END => "</think>".to_string(),
-        special_token::END_OF_SENTENCE => "<|end_of_sentence|>".to_string(),
+        special_token::QUAD_START => "<|quad_start|>".to_string(),
+        special_token::QUAD_END => "<|quad_end|>".to_string(),
+        special_token::VISION_START => "<|vision_start|>".to_string(),
+        special_token::VISION_END => "<|vision_end|>".to_string(),
+        special_token::VISION_PAD => "<|vision_pad|>".to_string(),
+        special_token::IMAGE_PAD => "<|image_pad|>".to_string(),
+        special_token::VIDEO_PAD => "<|video_pad|>".to_string(),
+        special_token::TOOL_CALL_START => "<tool_call>".to_string(),
+        special_token::TOOL_CALL_END => "</tool_call>".to_string(),
+        special_token::FIM_PREFIX => "<|fim_prefix|>".to_string(),
+        special_token::FIM_MIDDLE => "<|fim_middle|>".to_string(),
+        special_token::FIM_SUFFIX => "<|fim_suffix|>".to_string(),
+        special_token::FIM_PAD => "<|fim_pad|>".to_string(),
+        special_token::REPO_NAME => "<|repo_name|>".to_string(),
+        special_token::FILE_SEP => "<|file_sep|>".to_string(),
         _ => return None,
     })
 }

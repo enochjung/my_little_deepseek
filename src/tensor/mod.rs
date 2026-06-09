@@ -5,10 +5,14 @@ use std::ops::Range;
 pub(crate) trait ElemType: Send + Sync {
     const BYTES: usize;
 }
+
+/// Represents the float32 computational element type.
 pub struct F32;
 impl ElemType for F32 {
     const BYTES: usize = 4;
 }
+
+/// Represents the bfloat16 computational element type.
 pub struct BF16;
 impl ElemType for BF16 {
     const BYTES: usize = 2;
@@ -560,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn case01_copy_subtensor() {
+    fn copy_subtensor() {
         let src = Tensor::new(
             Cpu::from([1.0f32, 2.0, 3.0, 2.0, 3.0, 4.0].as_slice()),
             0,
@@ -591,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn case02_cast_bf16_to_f32() {
+    fn cast_bf16_to_f32() {
         let src = Tensor::new(
             device_from_bf16(&[0x3f80, 0x4000, 0x4040, 0x4080]),
             0,
@@ -610,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn case03_rms_norm() {
+    fn rms_norm() {
         let mut x = Tensor::new(Cpu::from([3.0, 4.0, 0.0, 5.0].as_slice()), 0, 2, 2, 2)
             .expect("creating tensor should succeed");
 

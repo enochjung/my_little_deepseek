@@ -2,6 +2,7 @@
 name = "my_little_deepseek"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85.1"
 
 [dependencies]
-libc = "0.2.183"
+libc = "0.2.186"
