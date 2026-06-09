@@ -8,6 +8,26 @@ mod x86_64;
 /// - `x` must be valid for `n` contiguous `f32` values.
 /// - `x` must be aligned to `align_of::<f32>()` (4 bytes).
 /// - `n > 0` to avoid undefined behavior.
+///
+///
+
+/// Finds the index of the maximum value in a contiguous sequence of `f32` values.
+///
+/// This is typically used in `lm_head` for greedy decoding.
+///
+/// # Safety
+///
+/// - `x` must be a valid pointer to an array of at least `n` contiguous `f32` values.
+/// - `x` must be properly aligned to `align_of::<f32>()` (4 bytes).
+/// - `n` must be strictly greater than `0` to avoid undefined behavior.
+///
+/// # Examples
+///
+/// ```
+/// let x = [1.0, 5.0, 3.0];
+/// let max_idx = unsafe { argmax_n(x.as_ptr(), x.len()) };
+/// assert_eq!(max_idx, 1);
+/// ```
 pub(crate) unsafe fn argmax_n(x: *const f32, n: usize) -> u32 {
     #[cfg(target_arch = "x86_64")]
     {
@@ -200,7 +220,7 @@ pub(crate) unsafe fn safe_softmax_with_masking_n(
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
-            return unsafe { safe_softmax_with_masking_n_avx512(x, alpha, n_mask, n) };
+            return unsafe { x86_64::safe_softmax_with_masking_n_avx512(x, alpha, n_mask, n) };
         }
     }
 
@@ -431,74 +451,6 @@ pub(crate) unsafe fn mul_rmn_rmk_ckn(
                             };
                         }
                         unsafe { *c.add(i * ldc as usize + j) = sum };
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Computes `D = A * B + c` with `c` broadcasted along m-dimension.
-///
-/// # Parameters
-///
-/// - `d`: `D` base pointer, shape `(m, n)`.
-/// - `ldd`: `D` leading dimension.
-/// - `a`: `A` base pointer, shape `(m, k)`.
-/// - `lda`: `A` leading dimension.
-/// - `b`: `B` base pointer, shape `(k, n)`.
-/// - `ldb`: `B` leading dimension.
-/// - `c`: `c` base pointer, shape `(1, n)`.
-/// - `m`: shape `m`
-/// - `k`: shape `k`.
-/// - `n`: shape `n`.
-///
-/// # Safety
-///
-/// - `a`, `b`, `c`, and `d` cover the required ranges for `m`, `k`, `n`, layout flags, and strides.
-/// - `a`, `b`, `c`, and `d` do not overlap.
-/// - `a`, `b`, `c`, and `d` are 4-byte aligned.
-pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n(
-    d: *mut f32,
-    ldd: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    c: *const f32,
-    m: usize,
-    k: usize,
-    n: usize,
-) -> () {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx512f") {
-            return unsafe {
-                x86_64::mul_rmn_rmk_rkn_r1n_avx512(d, ldd, a, lda, b, ldb, c, m, k, n)
-            };
-        }
-    }
-
-    for i in 0..m {
-        for j in 0..n {
-            unsafe { *d.add(i * ldd as usize + j) = *c.add(j) };
-        }
-    }
-
-    for bi in (0..m).step_by(BLOCK_SIZE) {
-        for bk in (0..k).step_by(BLOCK_SIZE) {
-            for bj in (0..n).step_by(BLOCK_SIZE) {
-                let i_end = (bi + BLOCK_SIZE).min(m);
-                let k_end = (bk + BLOCK_SIZE).min(k);
-                let j_end = (bj + BLOCK_SIZE).min(n);
-
-                for i in bi..i_end {
-                    for k_idx in bk..k_end {
-                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
-                        for j in bj..j_end {
-                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
-                            unsafe { *d.add(i * ldd as usize + j) += a_val * b_val };
-                        }
                     }
                 }
             }

@@ -380,58 +380,6 @@ where
         Ok(())
     }
 
-    // self = AB + c
-    // shape of self must be (A.nrow * B.ncol)
-    // A.ncol may 1536
-    // B.nrow must be equal to A.ncol
-    // shape of C must be (1 * B.ncol)
-    // c is expanded in calculation
-    pub(crate) fn muladd_broadcast<
-        D0: Device<Base = M::Base>,
-        D1: Device<Base = M::Base>,
-        D2: Device<Base = M::Base>,
-    >(
-        &mut self,
-        #[allow(non_snake_case)] A: &Tensor<E, D0>,
-        #[allow(non_snake_case)] B: &Tensor<E, D1>,
-        c: &Tensor<E, D2>,
-    ) -> Result<(), crate::Error> {
-        validate_shape(
-            self.layout.nrow,
-            self.layout.ncol,
-            A.layout.nrow,
-            B.layout.ncol,
-        )?;
-        validate_shape(
-            A.layout.nrow,
-            A.layout.ncol,
-            self.layout.nrow,
-            B.layout.nrow,
-        )?;
-        validate_shape(
-            B.layout.nrow,
-            B.layout.ncol,
-            A.layout.ncol,
-            self.layout.ncol,
-        )?;
-        validate_shape(c.layout.nrow, c.layout.ncol, 1, self.layout.ncol)?;
-
-        unsafe {
-            M::Base::mul_mn_mk_kn_1n(
-                &mut self.device,
-                &self.layout,
-                &A.device,
-                &A.layout,
-                &B.device,
-                &B.layout,
-                &c.device,
-                &c.layout,
-            )
-        };
-
-        Ok(())
-    }
-
     // self = AB^T + c
     // shape of self must be (A.nrow * B.ncol)
     // A.ncol may 1536
