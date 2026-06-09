@@ -31,16 +31,15 @@ where
 {
     pub(crate) fn execute<M0: MutableDevice<Base = D::Base>, M1: MutableDevice<Base = D::Base>>(
         &self,
-        x: Tensor<E, M0>,
+        target_1_x_h: Tensor<E, M0>,
         tmp_1_x_v: &mut Tensor<E, M1>,
     ) -> Result<u32, crate::Error> {
-        let mut x = x;
+        let mut target_1_x_h = target_1_x_h;
 
-        self.rms_norm.execute(&mut x)?;
-        tmp_1_x_v.mul_bt(&x, &self.lm_head.transpose())?;
+        self.rms_norm.execute(&mut target_1_x_h)?;
+        tmp_1_x_v.mul_bt(&target_1_x_h, &self.lm_head.transpose())?;
 
         let next_token = tmp_1_x_v.argmax()?;
-
         Ok(next_token)
     }
 }

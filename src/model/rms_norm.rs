@@ -30,8 +30,8 @@ where
 {
     pub(crate) fn execute<M0: MutableDevice<Base = D::Base>>(
         &self,
-        x: &mut Tensor<E, M0>,
+        target_r_x_h: &mut Tensor<E, M0>,
     ) -> Result<(), crate::Error> {
-        x.rms_norm(&self.norm_weight, self.epsilon)
+        target_r_x_h.rms_norm(&self.norm_weight, self.epsilon)
     }
 }

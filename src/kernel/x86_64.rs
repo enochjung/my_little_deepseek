@@ -1,8 +1,4 @@
 //! x86_64 kernels for vector and matrix primitives.
-//!
-//! Layout:
-//! - Row-major: `base[row * ld + col]`
-//! - Column-major: `base[row + col * ld]`
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
@@ -193,9 +189,26 @@ pub(crate) unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
-    let vec_end = unsafe { x.add(n & !15) };
+pub(crate) unsafe fn safe_softmax_with_masking_n_avx512(
+    x: *mut f32,
+    alpha: f32,
+    n_mask: usize,
+    n: usize,
+) -> () {
+    let active_n = n.saturating_sub(n_mask);
     let end = unsafe { x.add(n) };
+
+    if active_n == 0 {
+        let mut ptr = x;
+        while ptr != end {
+            unsafe { *ptr = 0.0 };
+            ptr = unsafe { ptr.add(1) };
+        }
+        return;
+    }
+
+    let vec_end = unsafe { x.add(active_n & !15) };
+    let active_end = unsafe { x.add(active_n) };
 
     let mut v_max = _mm512_set1_ps(f32::NEG_INFINITY);
     let mut ptr = x;
@@ -214,7 +227,7 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         }
     }
 
-    while ptr != end {
+    while ptr != active_end {
         let v = unsafe { *ptr };
         if v > max_val {
             max_val = v;
@@ -251,7 +264,7 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         sum += tmp_sum[i];
     }
 
-    while ptr != end {
+    while ptr != active_end {
         let v = unsafe { *ptr };
         let exp_v = (alpha * (v - max_val)).exp();
         unsafe { *ptr = exp_v };
@@ -270,8 +283,14 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         ptr = unsafe { ptr.add(16) };
     }
 
-    while ptr != end {
+    while ptr != active_end {
         unsafe { *ptr *= multiplier };
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let mut ptr = active_end;
+    while ptr != end {
+        unsafe { *ptr = 0.0 };
         ptr = unsafe { ptr.add(1) };
     }
 }
@@ -445,71 +464,6 @@ pub(crate) unsafe fn mul_rmn_rmk_ckn_avx512(
                         }
 
                         unsafe { *c.add(i * ldc as usize + j) = sum };
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn mul_rmn_rmk_rkn_r1n_avx512(
-    d: *mut f32,
-    ldd: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    c: *const f32,
-    m: usize,
-    k: usize,
-    n: usize,
-) -> () {
-    for i in 0..m {
-        let mut j = 0;
-        while j + 15 < n {
-            let c_vec = unsafe { _mm512_loadu_ps(c.add(j)) };
-            unsafe { _mm512_storeu_ps(d.add(i * ldd as usize + j), c_vec) };
-            j += 16;
-        }
-        while j < n {
-            unsafe { *d.add(i * ldd as usize + j) = *c.add(j) };
-            j += 1;
-        }
-    }
-
-    for bi in (0..m).step_by(BLOCK_SIZE) {
-        for bk in (0..k).step_by(BLOCK_SIZE) {
-            for bj in (0..n).step_by(BLOCK_SIZE) {
-                let i_end = (bi + BLOCK_SIZE).min(m);
-                let k_end = (bk + BLOCK_SIZE).min(k);
-                let j_end = (bj + BLOCK_SIZE).min(n);
-
-                for i in bi..i_end {
-                    for k_idx in bk..k_end {
-                        let a_val = unsafe { *a.add(i * lda as usize + k_idx) };
-                        let a_vec = _mm512_set1_ps(a_val);
-
-                        let mut j = bj;
-                        while j + 15 < j_end {
-                            let d_ptr = unsafe { d.add(i * ldd as usize + j) };
-                            let b_ptr = unsafe { b.add(k_idx * ldb as usize + j) };
-
-                            let d_vec = unsafe { _mm512_loadu_ps(d_ptr) };
-                            let b_vec = unsafe { _mm512_loadu_ps(b_ptr) };
-
-                            let out = _mm512_fmadd_ps(a_vec, b_vec, d_vec);
-                            unsafe { _mm512_storeu_ps(d_ptr, out) };
-
-                            j += 16;
-                        }
-
-                        while j < j_end {
-                            let b_val = unsafe { *b.add(k_idx * ldb as usize + j) };
-                            unsafe { *d.add(i * ldd as usize + j) += a_val * b_val };
-                            j += 1;
-                        }
                     }
                 }
             }

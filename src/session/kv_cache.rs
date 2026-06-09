@@ -36,17 +36,19 @@ impl<E: ElemType, OD: OwnedDevice> KVCache<E, OD> {
 
     pub(crate) fn allocate(
         &mut self,
+        t: u32,
     ) -> Result<(Tensor<E, &mut OD::Base>, Tensor<E, &mut OD::Base>), crate::Error> {
         let kvd = self.kv_head_size;
         let n = self.n;
+        let nt = n + t;
 
-        self.k.reshape(n + 1, kvd, kvd)?;
-        self.v.reshape(n + 1, kvd, kvd)?;
+        self.k.reshape(nt, kvd, kvd)?;
+        self.v.reshape(nt, kvd, kvd)?;
 
-        let k_mut = self.k.slice_mut(n..n + 1, 0..kvd);
-        let v_mut = self.v.slice_mut(n..n + 1, 0..kvd);
+        let k_mut = self.k.slice_mut(n..nt, 0..kvd);
+        let v_mut = self.v.slice_mut(n..nt, 0..kvd);
 
-        self.n += 1;
+        self.n = nt;
 
         Ok((k_mut, v_mut))
     }
