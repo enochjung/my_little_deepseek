@@ -49,25 +49,26 @@ where
 {
     pub(crate) fn execute<M0: MutableDevice<Base = D::Base>, M1: MutableDevice<Base = D::Base>>(
         &self,
-        x: &mut Tensor<E, M0>,
-        tmp_3_x_i: &mut Tensor<E, M1>,
+        t: u32,
+        target_t_x_h: &mut Tensor<E, M0>,
+        tmp_3t_x_i: &mut Tensor<E, M1>,
     ) -> Result<(), crate::Error> {
         let i = self.intermediate_size;
 
-        let tmp_3_x_i = tmp_3_x_i.slice_mut(0..3, 0..i);
-        let (mut gate, tmp_2_x_i) = tmp_3_x_i.split_row(1)?;
-        let (mut up, mut activated) = tmp_2_x_i.split_row(1)?;
+        let tmp_3t_x_i = tmp_3t_x_i.slice_mut(0..t * 3, 0..i);
+        let (mut gate_t_x_i, tmp_2t_x_i) = tmp_3t_x_i.split_row(t)?;
+        let (mut up_t_x_i, mut activated_t_x_i) = tmp_2t_x_i.split_row(t)?;
 
-        self.rms_norm.execute(x)?;
+        self.rms_norm.execute(target_t_x_h)?;
 
-        gate.mul_bt(&x, &self.gate.transpose())?;
-        up.mul_bt(&x, &self.up.transpose())?;
+        gate_t_x_i.mul_bt(&target_t_x_h, &self.gate.transpose())?;
+        up_t_x_i.mul_bt(&target_t_x_h, &self.up.transpose())?;
 
-        gate.silu();
+        gate_t_x_i.silu();
 
-        activated.mul_elementwise(&gate, &up, 1.0)?;
+        activated_t_x_i.mul_elementwise(&gate_t_x_i, &up_t_x_i, 1.0)?;
 
-        x.mul_bt(&activated, &self.down.transpose())?;
+        target_t_x_h.mul_bt(&activated_t_x_i, &self.down.transpose())?;
 
         Ok(())
     }

@@ -168,10 +168,10 @@ pub(crate) trait DeviceOps<E: ElemType>: OwnedDevice {
         theta: f32,
         d: f32,
     ) -> ();
-    unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> ();
-    unsafe fn safe_softmax<M: MutableDevice<Base = Self>>(
+    unsafe fn safe_softmax_with_masking<M: MutableDevice<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
         alpha: f32,
     ) -> ();
+    unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> ();
 }

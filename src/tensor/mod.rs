@@ -524,14 +524,14 @@ where
         Ok(())
     }
 
-    // SiLU : x / (1 + e^(-x)) (element op)
-    pub(crate) fn silu(&mut self) -> () {
-        unsafe { M::Base::silu(&mut self.device, &self.layout) };
+    // self = safe_softmax_with_masking(alpha * self). alpha > 0
+    pub(crate) fn safe_softmax_with_masking(&mut self, alpha: f32) -> () {
+        unsafe { M::Base::safe_softmax_with_masking(&mut self.device, &self.layout, alpha) };
     }
 
-    // self = safe_softmax(alpha * self). alpha > 0
-    pub(crate) fn safe_softmax(&mut self, alpha: f32) -> () {
-        unsafe { M::Base::safe_softmax(&mut self.device, &self.layout, alpha) };
+    // SiLU : x[i,j] / (1 + e^(-x[i,j])) (element op)
+    pub(crate) fn silu(&mut self) -> () {
+        unsafe { M::Base::silu(&mut self.device, &self.layout) };
     }
 }
 

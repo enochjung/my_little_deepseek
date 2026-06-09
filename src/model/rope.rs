@@ -3,29 +3,29 @@ use crate::tensor::{ElemType, Tensor};
 
 // https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen2/modeling_qwen2.py#L116
 
-pub(crate) struct RoPE<E: ElemType, M: MutableDevice> {
+pub(crate) struct RoPE<'a, E: ElemType, M: MutableDevice> {
     head_size: u32,
-    cossin: Tensor<E, M>,
+    cossin: &'a mut Tensor<E, M>,
 }
 
-impl<E: ElemType, M: MutableDevice> RoPE<E, M>
+impl<'a, E: ElemType, M: MutableDevice> RoPE<'a, E, M>
 where
     M::Base: DeviceOps<E>,
 {
     pub(crate) fn new(
-        tmp_1_x_d: Tensor<E, M>,
+        tmp_1_x_d: &'a mut Tensor<E, M>,
         token_index: u32,
         rope_theta: f32,
         head_size: u32,
     ) -> Result<Self, crate::Error> {
-        let mut cossin = tmp_1_x_d;
+        let cossin = tmp_1_x_d;
         cossin.rope_vector(token_index, rope_theta, head_size)?;
         Ok(Self { head_size, cossin })
     }
 
     pub(crate) fn execute<M0: MutableDevice<Base = M::Base>, M1: MutableDevice<Base = M::Base>>(
         &self,
-        x: &mut Tensor<E, M0>,
+        target_1_x_ad: &mut Tensor<E, M0>,
         tmp_1_x_d: &mut Tensor<E, M1>,
         iter: usize,
     ) -> Result<(), crate::Error> {
@@ -36,7 +36,7 @@ where
         let sin = self.cossin.slice(0..1, half..d);
 
         for i in 0..iter as u32 {
-            let dst = x.slice_mut(0..1, i * d..(i + 1) * d);
+            let dst = target_1_x_ad.slice_mut(0..1, i * d..(i + 1) * d);
 
             tmp_1_x_d.copy(&dst)?;
             let tmp_1_x_d = tmp_1_x_d.slice_mut(0..1, 0..d);

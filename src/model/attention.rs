@@ -78,48 +78,74 @@ where
     >(
         &self,
         kv_cache: &mut KVCache<E, OD>,
-        x: &mut Tensor<E, M0>,
+        t: u32,
+        target_t_x_h: &mut Tensor<E, M0>,
         tmp_2_x_d: &mut Tensor<E, M1>,
-        tmp_1_x_h: &mut Tensor<E, M2>,
-        tmp_1_x_n1: &mut Tensor<E, M3>,
+        tmp_t_x_h: &mut Tensor<E, M2>,
+        tmp_t_x_nt: &mut Tensor<E, M3>,
     ) -> Result<(), crate::Error>
     where
         D: Device<Base = OD>,
     {
         let d = self.head_size;
+        let h = d * self.num_attention_heads as u32;
         let n = kv_cache.n() as u32;
+        let nt = n + t;
+        let kvd = d * self.num_key_value_heads as u32;
 
+        let qtmp_t_x_h = tmp_t_x_h;
+        let (mut ktmp_t_x_kvd, mut vtmp_t_x_kvd) = kv_cache.allocate(t)?;
         let tmp_2_x_d = tmp_2_x_d.slice_mut(0..2, 0..d);
-        let (tmp0_1_x_d, mut tmp1_1_x_d) = tmp_2_x_d.split_row(1)?;
-        let rope = RoPE::new(tmp0_1_x_d, n, self.rope_theta, d)?;
-        let q = tmp_1_x_h;
-        let score = tmp_1_x_n1;
+        let (mut ropetmp0_1_x_d, mut ropetmp1_1_x_d) = tmp_2_x_d.split_row(1)?;
 
-        self.rms_norm.execute(x)?;
+        self.rms_norm.execute(target_t_x_h)?;
 
-        let (mut k, mut v) = kv_cache.allocate()?;
-        q.muladd_bt_broadcast(&x, &self.q_weight.transpose(), &self.q_bias)?;
-        k.muladd_bt_broadcast(&x, &self.k_weight.transpose(), &self.k_bias)?;
-        v.muladd_bt_broadcast(&x, &self.v_weight.transpose(), &self.v_bias)?;
-        rope.execute(q, &mut tmp1_1_x_d, self.num_attention_heads)?;
-        rope.execute(&mut k, &mut tmp1_1_x_d, self.num_key_value_heads)?;
+        qtmp_t_x_h.muladd_bt_broadcast(&target_t_x_h, &self.q_weight.transpose(), &self.q_bias)?;
+        ktmp_t_x_kvd.muladd_bt_broadcast(
+            &target_t_x_h,
+            &self.k_weight.transpose(),
+            &self.k_bias,
+        )?;
+        vtmp_t_x_kvd.muladd_bt_broadcast(
+            &target_t_x_h,
+            &self.v_weight.transpose(),
+            &self.v_bias,
+        )?;
 
-        let (k, v) = kv_cache.get_kv();
-        let k = k;
-        let v = v;
+        for i in 0..t {
+            let rope = RoPE::new(&mut ropetmp0_1_x_d, n + i, self.rope_theta, d)?;
+
+            let mut qtarget_1_x_h = qtmp_t_x_h.slice_mut(i..i + 1, 0..h);
+            let mut ktarget_1_x_h = ktmp_t_x_kvd.slice_mut(i..i + 1, 0..kvd);
+
+            rope.execute(
+                &mut qtarget_1_x_h,
+                &mut ropetmp1_1_x_d,
+                self.num_attention_heads,
+            )?;
+            rope.execute(
+                &mut ktarget_1_x_h,
+                &mut ropetmp1_1_x_d,
+                self.num_key_value_heads,
+            )?;
+        }
+
+        let score_t_x_nt = tmp_t_x_nt;
+
+        let (kref_nt_x_kvd, vref_nt_x_kvd) = kv_cache.get_kv();
         for i in 0..self.num_attention_heads as u32 {
             let kvi = i / (self.num_attention_heads / self.num_key_value_heads) as u32;
 
-            let mut qi = q.slice_mut(0..1, i * d..(i + 1) * d);
-            let ki = k.slice(0..n + 1, kvi * d..(kvi + 1) * d);
-            let vi = v.slice(0..n + 1, kvi * d..(kvi + 1) * d);
+            let mut qi_t_x_d = qtmp_t_x_h.slice_mut(0..t, i * d..(i + 1) * d);
+            let ki_nt_x_d = kref_nt_x_kvd.slice(0..nt, kvi * d..(kvi + 1) * d);
+            let vi_nt_x_d = vref_nt_x_kvd.slice(0..nt, kvi * d..(kvi + 1) * d);
 
-            score.mul_bt(&qi, &ki.transpose())?;
-            score.safe_softmax(1.0 / ((d as f32).sqrt()));
-            qi.mul(&score, &vi)?;
+            score_t_x_nt.mul_bt(&qi_t_x_d, &ki_nt_x_d.transpose())?;
+            score_t_x_nt.safe_softmax_with_masking(1.0 / ((d as f32).sqrt()));
+            qi_t_x_d.mul(&score_t_x_nt, &vi_nt_x_d)?;
         }
 
-        x.mul_bt(&q, &self.o_weight.transpose())?;
+        target_t_x_h.mul_bt(&qtmp_t_x_h, &self.o_weight.transpose())?;
 
         Ok(())
     }

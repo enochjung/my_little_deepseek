@@ -169,29 +169,10 @@ where
     ED::Base: DeviceOps<E>,
     TD::Base: DeviceOps<E>,
 {
-    pub(crate) fn prefill<OD: OwnedDevice>(
-        &self,
-        kv_caches: &mut Vec<KVCache<E, OD>>,
-        tokens: &[u32],
-    ) -> Result<u32, crate::Error>
-    where
-        TD: Device<Base = OD>,
-        ED: Device<Base = OD>, // temporary
-    {
-        //todo!("impl real prefill");
-
-        let mut next_token = 0;
-
-        for &token in tokens {
-            next_token = self.decode(kv_caches, token)?;
-        }
-        Ok(next_token)
-    }
-
     pub(crate) fn decode<OD: OwnedDevice>(
         &self,
         kv_caches: &mut Vec<KVCache<E, OD>>,
-        token: u32,
+        token_ids: &[u32],
     ) -> Result<u32, crate::Error>
     where
         TD: Device<Base = OD>,
@@ -199,31 +180,47 @@ where
     {
         let h = self.hidden_size;
         let d = self.head_size;
-        let n1 = kv_caches[0].n() + 1;
+        let t = token_ids.len() as u32;
+        let nt = kv_caches[0].n() + t;
         let i = self.intermediate_size;
         let v = self.vocab_size;
 
         let mut tmp_2_x_d = Tensor::new(TD::Base::new(2 * d as usize * E::BYTES)?, 0, 2, d, d)?;
-        let mut tmp_2_x_h = Tensor::new(TD::Base::new(2 * h as usize * E::BYTES)?, 0, 2, h, h)?;
-        let mut tmp_1_x_n1 = Tensor::new(TD::Base::new(1 * n1 as usize * E::BYTES)?, 0, 1, n1, n1)?;
-        let mut tmp_3_x_i = Tensor::new(TD::Base::new(3 * i as usize * E::BYTES)?, 0, 3, i, i)?;
+        let mut tmp_2t_x_h = Tensor::new(
+            TD::Base::new((2 * t * h) as usize * E::BYTES)?,
+            0,
+            2 * t,
+            h,
+            h,
+        )?;
+        let mut tmp_t_x_nt =
+            Tensor::new(TD::Base::new((t * nt) as usize * E::BYTES)?, 0, t, nt, nt)?;
+        let mut tmp_3t_x_i = Tensor::new(
+            TD::Base::new((3 * t * i) as usize * E::BYTES)?,
+            0,
+            3 * t,
+            i,
+            i,
+        )?;
         let mut tmp_1_x_v = Tensor::new(TD::Base::new(1 * v as usize * E::BYTES)?, 0, 1, v, v)?;
 
-        let mut x = Tensor::new(ED::Base::new(1 * h as usize * E::BYTES)?, 0, 1, h, h)?;
+        let mut target_t_x_h =
+            Tensor::new(ED::Base::new((t * h) as usize * E::BYTES)?, 0, t, h, h)?;
 
-        self.token_embedding(&mut x, &[token])?;
+        self.token_embedding(&mut target_t_x_h, token_ids)?;
 
         //todo!("move x from ED to TD");
 
         self.transformer(
             kv_caches,
-            &mut x,
+            t,
+            &mut target_t_x_h,
             &mut tmp_2_x_d,
-            &mut tmp_2_x_h,
-            &mut tmp_1_x_n1,
-            &mut tmp_3_x_i,
+            &mut tmp_2t_x_h,
+            &mut tmp_t_x_nt,
+            &mut tmp_3t_x_i,
         )?;
-        let next_token = self.sampling(x, &mut tmp_1_x_v)?;
+        let next_token = self.sampling(target_t_x_h.slice_mut(t - 1..t, 0..h), &mut tmp_1_x_v)?;
 
         Ok(next_token)
     }
@@ -257,35 +254,38 @@ where
     >(
         &self,
         kv_caches: &mut Vec<KVCache<E, OD>>,
-        x: &mut Tensor<E, M0>,
+        t: u32,
+        target_t_x_h: &mut Tensor<E, M0>,
         tmp_2_x_d: &mut Tensor<E, M1>,
-        tmp_2_x_h: &mut Tensor<E, M2>,
-        tmp_1_x_n1: &mut Tensor<E, M3>,
-        tmp_3_x_i: &mut Tensor<E, M4>,
+        tmp_2t_x_h: &mut Tensor<E, M2>,
+        tmp_t_x_nt: &mut Tensor<E, M3>,
+        tmp_3t_x_i: &mut Tensor<E, M4>,
     ) -> Result<(), crate::Error>
     where
         TD: Device<Base = OD>,
     {
         let h = self.hidden_size;
-        let tmp_2_x_h = tmp_2_x_h.slice_mut(0..2, 0..h);
-        let (mut residual, mut tmp_1_x_h) = tmp_2_x_h.split_row(1)?;
+
+        let tmp_2t_x_h = tmp_2t_x_h.slice_mut(0..t * 2, 0..h);
+        let (mut residual_t_x_h, mut tmp_t_x_h) = tmp_2t_x_h.split_row(t)?;
 
         for layer in 0..self.num_hidden_layers {
-            residual.copy(&x)?;
+            residual_t_x_h.copy(&target_t_x_h)?;
 
             self.attentions[layer].execute(
                 &mut kv_caches[layer],
-                x,
+                t,
+                target_t_x_h,
                 tmp_2_x_d,
-                &mut tmp_1_x_h,
-                tmp_1_x_n1,
+                &mut tmp_t_x_h,
+                tmp_t_x_nt,
             )?;
 
-            x.add(&residual)?;
+            target_t_x_h.add(&residual_t_x_h)?;
 
-            residual.copy(&x)?;
-            self.feed_forwards[layer].execute(x, tmp_3_x_i)?;
-            x.add(&residual)?;
+            residual_t_x_h.copy(&target_t_x_h)?;
+            self.feed_forwards[layer].execute(t, target_t_x_h, tmp_3t_x_i)?;
+            target_t_x_h.add(&residual_t_x_h)?;
         }
 
         Ok(())
@@ -293,10 +293,10 @@ where
 
     fn sampling<M0: MutableDevice<Base = ED::Base>, M1: MutableDevice<Base = ED::Base>>(
         &self,
-        x: Tensor<E, M0>,
+        target_1_x_h: Tensor<E, M0>,
         tmp_1_x_v: &mut Tensor<E, M1>,
     ) -> Result<u32, crate::Error> {
-        self.sampling.execute(x, tmp_1_x_v)
+        self.sampling.execute(target_1_x_h, tmp_1_x_v)
     }
 }
 

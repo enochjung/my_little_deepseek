@@ -190,7 +190,7 @@ fn render_special_token(token: u32) -> Option<String> {
 
 fn run<'a, E: ElemType, ED: Device, TD: Device>(
     model: &'a Model<E, ED, TD>,
-    prefill_tokens: Vec<u32>,
+    tokens: Vec<u32>,
     mut kv_caches: Vec<KVCache<E, TD::Base>>,
     abort_flag: Arc<AtomicBool>,
     transmitter: mpsc::Sender<u32>,
@@ -200,7 +200,7 @@ where
     TD::Base: DeviceOps<E>,
     ED: Device<Base = TD::Base>,
 {
-    let next_token = model.prefill(&mut kv_caches, &prefill_tokens)?;
+    let next_token = model.decode(&mut kv_caches, &tokens)?;
     if transmitter.send(next_token).is_err() {
         return Ok(kv_caches);
     }
@@ -214,7 +214,7 @@ where
             return Ok(kv_caches);
         }
 
-        let next_token = model.decode(&mut kv_caches, current_token)?;
+        let next_token = model.decode(&mut kv_caches, &[current_token])?;
         if transmitter.send(next_token).is_err() {
             return Ok(kv_caches);
         }

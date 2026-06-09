@@ -193,9 +193,26 @@ pub(crate) unsafe fn silu_n_avx512(x: *mut f32, n: usize) -> () {
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
-pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) -> () {
-    let vec_end = unsafe { x.add(n & !15) };
+pub(crate) unsafe fn safe_softmax_with_masking_n_avx512(
+    x: *mut f32,
+    alpha: f32,
+    n_mask: usize,
+    n: usize,
+) -> () {
+    let active_n = n.saturating_sub(n_mask);
     let end = unsafe { x.add(n) };
+
+    if active_n == 0 {
+        let mut ptr = x;
+        while ptr != end {
+            unsafe { *ptr = 0.0 };
+            ptr = unsafe { ptr.add(1) };
+        }
+        return;
+    }
+
+    let vec_end = unsafe { x.add(active_n & !15) };
+    let active_end = unsafe { x.add(active_n) };
 
     let mut v_max = _mm512_set1_ps(f32::NEG_INFINITY);
     let mut ptr = x;
@@ -214,7 +231,7 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         }
     }
 
-    while ptr != end {
+    while ptr != active_end {
         let v = unsafe { *ptr };
         if v > max_val {
             max_val = v;
@@ -251,7 +268,7 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         sum += tmp_sum[i];
     }
 
-    while ptr != end {
+    while ptr != active_end {
         let v = unsafe { *ptr };
         let exp_v = (alpha * (v - max_val)).exp();
         unsafe { *ptr = exp_v };
@@ -270,8 +287,14 @@ pub(crate) unsafe fn safe_softmax_n_avx512(x: *mut f32, alpha: f32, n: usize) ->
         ptr = unsafe { ptr.add(16) };
     }
 
-    while ptr != end {
+    while ptr != active_end {
         unsafe { *ptr *= multiplier };
+        ptr = unsafe { ptr.add(1) };
+    }
+
+    let mut ptr = active_end;
+    while ptr != end {
+        unsafe { *ptr = 0.0 };
         ptr = unsafe { ptr.add(1) };
     }
 }

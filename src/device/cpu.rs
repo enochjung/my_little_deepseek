@@ -376,12 +376,7 @@ impl DeviceOps<F32> for Cpu {
         let n = dst_layout.ncol as usize;
         unsafe { kernel::rope_sin_n(dst, n, k, theta, d) };
     }
-    unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> () {
-        let dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
-        let n = (dst_layout.nrow * dst_layout.ncol) as usize;
-        unsafe { kernel::silu_n(dst, n) };
-    }
-    unsafe fn safe_softmax<M: MutableDevice<Base = Self>>(
+    unsafe fn safe_softmax_with_masking<M: MutableDevice<Base = Self>>(
         dst: &mut M,
         dst_layout: &Layout,
         alpha: f32,
@@ -389,8 +384,17 @@ impl DeviceOps<F32> for Cpu {
         let n = dst_layout.ncol as usize;
 
         let mut dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
+        for n_mask in (0..dst_layout.nrow as usize).rev() {
+            unsafe { kernel::safe_softmax_with_masking_n(dst, alpha, n_mask, n) };
+            dst = unsafe { dst.add(dst_layout.stride as usize) };
+        }
+    }
+    unsafe fn silu<M: MutableDevice<Base = Self>>(dst: &mut M, dst_layout: &Layout) -> () {
+        let n = dst_layout.ncol as usize;
+
+        let mut dst = unsafe { dst.as_mut_ptr().byte_add(dst_layout.offset) } as *mut f32;
         for _ in 0..dst_layout.nrow {
-            unsafe { kernel::safe_softmax_n(dst, alpha, n) };
+            unsafe { kernel::silu_n(dst, n) };
             dst = unsafe { dst.add(dst_layout.stride as usize) };
         }
     }
