@@ -237,18 +237,18 @@ mod tests {
         let actual = super::pretokenize(input);
         assert_eq!(
             actual, expected,
-            "actual:{:?}, expected:{:?}",
-            actual, expected
+            "expected:{:?}, actual:{:?}",
+            expected, actual
         );
     }
 
     #[test]
-    fn case01_hello() {
+    fn hello() {
         assert("Hello!", &["Hello", "!"]);
     }
 
     #[test]
-    fn case02_summarize() {
+    fn summarize() {
         assert(
             "Summarize: Rust ownership prevents data races.",
             &[
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn case03_math_question() {
+    fn math_question() {
         assert(
             "What is 2 + 2?",
             &["What", " is", " ", "2", " +", " ", "2", "?"],
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn case04_whitespace() {
+    fn whitespace() {
         assert(
             "Whitespace test:  keep   multiple spaces, tabs\t, and blank lines\n\nend.",
             &[
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn case05_emoji() {
+    fn emoji() {
         assert(
             "Emoji test: cats 😺 rockets 🚀 and sparkles ✨.",
             &[
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn case06_json() {
+    fn json() {
         assert(
             "Answer with JSON: { \"name\": \"Alice\", \"age\": 27 }",
             &[
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn case07_list_numbers() {
+    fn list_numbers() {
         assert(
             "List these: 2, 3, 5, 7, 11, 13, 17, 19",
             &[
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn case08_code_tip() {
+    fn code_tip() {
         assert(
             "Code tip: avoid unwrap() in production Rust.",
             &[
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn case09_compute() {
+    fn compute() {
         assert(
             "Compute: 127 * 43 = 5461",
             &[
@@ -371,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn case10_python_block() {
+    fn python_block() {
         assert(
             "Code:\n```python\nfor i in range(3):\n    print(i)\n```",
             &[

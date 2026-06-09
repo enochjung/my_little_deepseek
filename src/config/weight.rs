@@ -204,14 +204,14 @@ mod tests {
 
         if let Some(info) = tensor_info.get(tensor_name) {
             assert_eq!(
-                info.shape, expected_shape,
-                "actual: {:?}, expected: {:?}",
-                info.shape, expected_shape
+                expected_shape, info.shape,
+                "expected: {:?}, actual: {:?}",
+                expected_shape, info.shape
             );
             assert_eq!(
-                info.offset, expected_offset,
-                "actual: {:?}, expected: {:?}",
-                info.offset, expected_offset
+                expected_offset, info.offset,
+                "expected: {:?}, actual: {:?}",
+                expected_offset, info.offset,
             );
             return;
         }
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn case01_text_embed_tokens_weight() {
+    fn text_embed_tokens_weight() {
         assert(
             "model.embed_tokens.weight",
             &[151936, 1536],
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn case02_text_q_proj_bias() {
+    fn text_q_proj_bias() {
         assert(
             "model.layers.0.self_attn.q_proj.bias",
             &[1536],
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn case03_text_k_proj_weight() {
+    fn text_k_proj_weight() {
         assert(
             "model.layers.1.self_attn.k_proj.weight",
             &[256, 1536],
@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn case04_text_v_proj_weight() {
+    fn text_v_proj_weight() {
         assert(
             "model.layers.2.self_attn.v_proj.weight",
             &[256, 1536],
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn case05_text_o_proj_weight() {
+    fn text_o_proj_weight() {
         assert(
             "model.layers.3.self_attn.o_proj.weight",
             &[1536, 1536],
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn case06_text_gate_proj_weight() {
+    fn text_gate_proj_weight() {
         assert(
             "model.layers.4.mlp.gate_proj.weight",
             &[8960, 1536],
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn case07_text_up_proj_weight() {
+    fn text_up_proj_weight() {
         assert(
             "model.layers.5.mlp.up_proj.weight",
             &[8960, 1536],
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn case08_text_down_proj_weight() {
+    fn text_down_proj_weight() {
         assert(
             "model.layers.6.mlp.down_proj.weight",
             &[1536, 8960],
@@ -292,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn case09_text_input_layernorm_weight() {
+    fn text_input_layernorm_weight() {
         assert(
             "model.layers.7.input_layernorm.weight",
             &[1536],
@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn case10_text_post_attention_layernorm_weight() {
+    fn text_post_attention_layernorm_weight() {
         assert(
             "model.layers.27.post_attention_layernorm.weight",
             &[1536],
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn case11_text_norm_weight() {
+    fn text_norm_weight() {
         assert(
             "model.norm.weight",
             &[1536],
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn case12_text_lm_head_weight() {
+    fn text_lm_head_weight() {
         assert(
             "lm_head.weight",
             &[151936, 1536],

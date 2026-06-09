@@ -498,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn case01_embedding_hello_world() {
+    fn embedding_hello_world() {
         // "Hello, world!" -> token_ids: [9707, 11, 1879, 0]
         let token_ids = [9707, 11, 1879, 0];
         let expected_rows = [

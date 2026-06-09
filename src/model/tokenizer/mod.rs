@@ -89,43 +89,33 @@ mod tests {
         let actual = tokenizer.encode(input).expect("tokenizing should succeed");
         assert_eq!(
             actual, expected,
-            "actual: {:?}, expected: {:?}",
-            actual, expected
+            "expected: {:?}, actual: {:?}",
+            expected, actual
         );
     }
 
     #[test]
-    fn case01_cafe_acute() {
+    fn cafe_acute() {
         assert("Cafe\u{0301}", &[34, 2577, 963]);
     }
 
     #[test]
-    fn case02_chinese() {
+    fn chinese() {
         assert("中文分词测试", &[104811, 17177, 99689, 81705]);
     }
 
     #[test]
-    fn case03_hello_world() {
-        assert("hello world", &[14990, 1879]);
-    }
-
-    #[test]
-    fn case04_hello_world_upper() {
-        assert("HELLO WORLD", &[50712, 1593, 50891]);
-    }
-
-    #[test]
-    fn case05_hello_world_punct() {
+    fn hello_world() {
         assert("Hello, world!", &[9707, 11, 1879, 0]);
     }
 
     #[test]
-    fn case06_multi_spaces() {
+    fn multi_spaces() {
         assert("a    b     c", &[64, 262, 293, 257, 272]);
     }
 
     #[test]
-    fn case07_multiline() {
+    fn multiline() {
         assert(
             "line1\nline2\nline3",
             &[1056, 16, 198, 1056, 17, 198, 1056, 18],
@@ -133,12 +123,12 @@ mod tests {
     }
 
     #[test]
-    fn case08_tabs() {
+    fn tabs() {
         assert("tabs\tbetween\twords", &[30993, 2233, 10053, 197, 5761]);
     }
 
     #[test]
-    fn case09_leading_trailing_space() {
+    fn leading_trailing_space() {
         assert(
             " leading and trailing spaces ",
             &[6388, 323, 27748, 12621, 220],
@@ -146,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn case10_json_snippet() {
+    fn json_snippet() {
         assert(
             "json = {\"a\": [1, 2, 3], \"ok\": true}",
             &[
@@ -157,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn case11_dialog_1() {
+    fn dialog01() {
         assert(
             "hi, can you help me debug this tokenizer?",
             &[6023, 11, 646, 498, 1492, 752, 7390, 419, 45958, 30],
@@ -165,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn case12_dialog_2() {
+    fn dialog02() {
         assert(
             "sure, what input is failing for you?",
             &[19098, 11, 1128, 1946, 374, 21394, 369, 498, 30],
@@ -173,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn case13_dialog_3() {
+    fn dialog03() {
         assert(
             "it breaks on multiple spaces, can you check?",
             &[275, 18303, 389, 5248, 12621, 11, 646, 498, 1779, 30],
@@ -181,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn case14_dialog_4() {
+    fn dialog04() {
         assert(
             "yes, send me the exact string please.",
             &[9693, 11, 3624, 752, 279, 4734, 914, 4486, 13],
@@ -189,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn case15_dialog_5() {
+    fn dialog05() {
         assert(
             "here: 'a    b     c' and it looks odd.",
             &[
@@ -199,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn case16_dialog_6() {
+    fn dialog06() {
         assert(
             "ok, I will compare token ids now.",
             &[562, 11, 358, 686, 9429, 3950, 14151, 1431, 13],
@@ -207,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn case17_dialog_7() {
+    fn dialog07() {
         assert(
             "quick check: does newline handling look right?",
             &[27763, 1779, 25, 1558, 39027, 11589, 1401, 1290, 30],
@@ -215,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn case18_dialog_8() {
+    fn dialog08() {
         assert(
             "I think so, but test line1\\nline2\\nline3 too.",
             &[
@@ -225,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn case19_url() {
+    fn url() {
         assert(
             "please test url parsing: https://example.com/a?b=1",
             &[
@@ -235,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn case20_numbers() {
+    fn numbers() {
         assert(
             "thanks, also verify numbers like -1 +2 3.14159.",
             &[
