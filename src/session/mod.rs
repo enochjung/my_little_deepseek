@@ -178,12 +178,28 @@ impl<'a, E: ElemType, ED: Device, TD: Device> Drop for SessionTask<'a, E, ED, TD
 
 fn render_special_token(token: u32) -> Option<String> {
     Some(match token {
-        special_token::BEGIN_OF_SENTENCE => "<|begin_of_sentence|>".to_string(),
+        special_token::END_OF_SENTENCE => "<|end_of_sentence|>".to_string(),
         special_token::USER => "<|User|>".to_string(),
         special_token::ASSISTANT => "<|Assistant|>".to_string(),
+        special_token::BEGIN_OF_SENTENCE => "<|begin_of_sentence|>".to_string(),
+        special_token::EOT => "<|EOT|>".to_string(),
         special_token::THINK_START => "<think>".to_string(),
         special_token::THINK_END => "</think>".to_string(),
-        special_token::END_OF_SENTENCE => "<|end_of_sentence|>".to_string(),
+        special_token::QUAD_START => "<|quad_start|>".to_string(),
+        special_token::QUAD_END => "<|quad_end|>".to_string(),
+        special_token::VISION_START => "<|vision_start|>".to_string(),
+        special_token::VISION_END => "<|vision_end|>".to_string(),
+        special_token::VISION_PAD => "<|vision_pad|>".to_string(),
+        special_token::IMAGE_PAD => "<|image_pad|>".to_string(),
+        special_token::VIDEO_PAD => "<|video_pad|>".to_string(),
+        special_token::TOOL_CALL_START => "<tool_call>".to_string(),
+        special_token::TOOL_CALL_END => "</tool_call>".to_string(),
+        special_token::FIM_PREFIX => "<|fim_prefix|>".to_string(),
+        special_token::FIM_MIDDLE => "<|fim_middle|>".to_string(),
+        special_token::FIM_SUFFIX => "<|fim_suffix|>".to_string(),
+        special_token::FIM_PAD => "<|fim_pad|>".to_string(),
+        special_token::REPO_NAME => "<|repo_name|>".to_string(),
+        special_token::FILE_SEP => "<|file_sep|>".to_string(),
         _ => return None,
     })
 }
