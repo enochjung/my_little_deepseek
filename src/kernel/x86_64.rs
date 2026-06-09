@@ -358,7 +358,6 @@ pub(crate) unsafe fn rope_sin_n_avx512(x: *mut f32, n: usize, k: f32, theta: f32
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f")]
 const BLOCK_SIZE: usize = 64;
 
 #[cfg(target_arch = "x86_64")]
