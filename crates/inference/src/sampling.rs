@@ -1,4 +1,4 @@
-use core::{ElemType, MLTError, Memory, MemoryMut};
+use core::{BackendOps, ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
 
 use crate::rms_norm::RMSNorm;
 use crate::tensor::Tensor;
@@ -8,8 +8,11 @@ pub struct Sampling<T: ElemType, M: Memory<T>> {
     lm_head: Tensor<T, M>,
 }
 
-impl<T: ElemType, M: Memory<T>> Sampling<T, M> {
-    pub fn new(last_norm: Tensor<T, M>, lm_head: Tensor<T, M>, rms_norm_epsilon: T) -> Self {
+impl<T: ElemType, M: Memory<T>> Sampling<T, M>
+where
+    <M::Base as MemoryOwn<T>>::Operator: BackendOps<T>,
+{
+    pub fn new(last_norm: Tensor<T, M>, lm_head: Tensor<T, M>, rms_norm_epsilon: f32) -> Self {
         let rms_norm = RMSNorm::new(last_norm, rms_norm_epsilon);
         Self {
             rms_norm,

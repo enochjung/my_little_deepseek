@@ -1,7 +1,7 @@
-use crate::{Backend, ElemType, MLTError};
-use std::convert::TryFrom;
+use crate::backend::Backend;
+use crate::error::MLTError;
 
-pub trait Memory<T: ElemType>: Send + Sync {
+pub trait Memory<T>: Send + Sync {
     type Base: MemoryOwn<T>;
 
     fn as_base(&self) -> &Self::Base;
@@ -9,21 +9,19 @@ pub trait Memory<T: ElemType>: Send + Sync {
     fn as_ptr(&self) -> *const T;
 }
 
-pub trait MemoryMut<T: ElemType>: Memory<T> {
+pub trait MemoryMut<T>: Memory<T> {
     fn as_mut_base(&mut self) -> &mut Self::Base;
     fn as_mut_ptr(&mut self) -> *mut T;
 }
 
-pub trait MemoryOwn<T: ElemType>:
-    MemoryMut<T, Base = Self> + TryFrom<std::fs::File, Error = MLTError>
-{
-    type Backend: Backend<T, Memory = Self>;
+pub trait MemoryOwn<T>: MemoryMut<T, Base = Self> + Sized {
+    type Operator: Backend<T, Operand = Self>;
 
     fn new(size: usize) -> Result<Self, MLTError>;
     fn resize(&mut self, size: usize) -> Result<(), MLTError>;
 }
 
-impl<T: ElemType, MO: MemoryOwn<T>> Memory<T> for &MO {
+impl<T, MO: MemoryOwn<T>> Memory<T> for &MO {
     type Base = MO;
 
     fn size(&self) -> usize {
@@ -37,7 +35,7 @@ impl<T: ElemType, MO: MemoryOwn<T>> Memory<T> for &MO {
     }
 }
 
-impl<T: ElemType, MO: MemoryOwn<T>> Memory<T> for &mut MO {
+impl<T, MO: MemoryOwn<T>> Memory<T> for &mut MO {
     type Base = MO;
 
     fn size(&self) -> usize {
@@ -51,7 +49,7 @@ impl<T: ElemType, MO: MemoryOwn<T>> Memory<T> for &mut MO {
     }
 }
 
-impl<T: ElemType, MO: MemoryOwn<T>> MemoryMut<T> for &mut MO {
+impl<T, MO: MemoryOwn<T>> MemoryMut<T> for &mut MO {
     fn as_mut_base(&mut self) -> &mut Self::Base {
         (**self).as_mut_base()
     }

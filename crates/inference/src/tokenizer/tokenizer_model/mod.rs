@@ -44,8 +44,8 @@ mod tests {
     use super::TokenizerModel;
     use config::{MergeFormat, VocabFormat};
 
-    const MERGE_PATH: &'static str = "model/merges.json";
-    const VOCAB_PATH: &'static str = "model/vocab.json";
+    const MERGE_PATH: &'static str = "../../model/merges.json";
+    const VOCAB_PATH: &'static str = "../../model/vocab.json";
 
     fn assert(input: &[Vec<String>], expected: &[u32]) {
         let merge_format = MergeFormat::HuggingFace {
@@ -55,8 +55,8 @@ mod tests {
             path: VOCAB_PATH.to_string(),
         };
         let model_engine = TokenizerModel::new(&merge_format, &vocab_format)
-            .expect("initializing model should succeed");
-        let actual = model_engine.encode(input).expect("encoding should succeed");
+            .expect("Failed to initialize tokenizer model");
+        let actual = model_engine.encode(input).expect("Failed to encode text");
         assert_eq!(
             actual, expected,
             "expected:{:?}, actual:{:?}",

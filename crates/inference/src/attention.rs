@@ -1,4 +1,4 @@
-use core::{ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
+use core::{BackendOps, ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
 
 use crate::kv_cache::KVCache;
 use crate::rms_norm::RMSNorm;
@@ -30,14 +30,17 @@ pub struct GroupedQueryAttention<T: ElemType, M: Memory<T>> {
     rope_theta: T,
 }
 
-impl<T: ElemType, M: Memory<T>> GroupedQueryAttention<T, M> {
+impl<T: ElemType, M: Memory<T>> GroupedQueryAttention<T, M>
+where
+    <M::Base as MemoryOwn<T>>::Operator: BackendOps<T>,
+{
     pub fn new(
         norm: Tensor<T, M>,
         weights: AttentionWeights<T, M>,
         head_size: u32,
         num_attention_heads: usize,
         num_key_value_heads: usize,
-        rms_norm_epsilon: T,
+        rms_norm_epsilon: f32,
         rope_theta: T,
     ) -> Self {
         let rms_norm = RMSNorm::new(norm, rms_norm_epsilon);
@@ -125,13 +128,8 @@ impl<T: ElemType, M: Memory<T>> GroupedQueryAttention<T, M> {
             let vi_nt_x_d = vref_nt_x_kvd.slice(0..nt, kvi * d..(kvi + 1) * d);
 
             score_t_x_nt.matmul(&qi_t_x_d, &ki_d_x_nt)?;
-            score_t_x_nt.scalar_mul_assign(T::from_u32(d).inv_sqrt());
-            for i in 0..t - 1 {
-                let n_mask = t - 1 - i;
-                let mut to_be_masked = score_t_x_nt.slice_mut(i..i + 1, nt - n_mask..nt);
-                to_be_masked.fill(T::MIN);
-            }
-            score_t_x_nt.safe_softmax();
+            score_t_x_nt.scalar_mul_assign(T::from_f32(1.0 / (d as f32).sqrt()));
+            score_t_x_nt.masked_safe_softmax()?;
             qi_t_x_d.matmul(score_t_x_nt, &vi_nt_x_d)?;
         }
 

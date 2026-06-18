@@ -51,10 +51,10 @@ mod tests {
     use config::{CompositionExclusionFormat, MergeFormat, UnicodeFormat, VocabFormat};
     use std::sync::OnceLock;
 
-    const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
-    const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
-    const MERGE_PATH: &'static str = "model/merges.json";
-    const VOCAB_PATH: &'static str = "model/vocab.json";
+    const UNICODE_PATH: &'static str = "../../model/UnicodeData.txt";
+    const COMPOSITION_EXCLUSION_PATH: &'static str = "../../model/CompositionExclusions.txt";
+    const MERGE_PATH: &'static str = "../../model/merges.json";
+    const VOCAB_PATH: &'static str = "../../model/vocab.json";
 
     static PRECOMPUTED_TOKENIZER: OnceLock<Tokenizer> = OnceLock::new();
 
@@ -80,14 +80,14 @@ mod tests {
                 &merge_format,
                 &vocab_format,
             )
-            .expect("initializing tokenizer should succeed")
+            .expect("Failed to initialize tokenizer")
         })
     }
 
     fn assert(input: &str, expected: &[u32]) {
         let tokenizer = get_tokenizer();
 
-        let actual = tokenizer.encode(input).expect("tokenizing should succeed");
+        let actual = tokenizer.encode(input).expect("Failed to tokenize");
         assert_eq!(
             actual, expected,
             "expected: {:?}, actual: {:?}",

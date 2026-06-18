@@ -269,8 +269,8 @@ mod tests {
     use config::{CompositionExclusionFormat, UnicodeFormat};
     use std::sync::OnceLock;
 
-    const UNICODE_PATH: &'static str = "model/UnicodeData.txt";
-    const COMPOSITION_EXCLUSION_PATH: &'static str = "model/CompositionExclusions.txt";
+    const UNICODE_PATH: &'static str = "../../model/UnicodeData.txt";
+    const COMPOSITION_EXCLUSION_PATH: &'static str = "../../model/CompositionExclusions.txt";
 
     static PRECOMPUTED_NORMALIZER: OnceLock<Normalizer> = OnceLock::new();
 
@@ -284,7 +284,7 @@ mod tests {
                     path: COMPOSITION_EXCLUSION_PATH.to_string(),
                 };
             Normalizer::new(&unicode_format, &composition_exclusion_format)
-                .expect("initializing normalizer should succeed")
+                .expect("Failed to initialize normalizer")
         })
     }
 
@@ -293,9 +293,7 @@ mod tests {
 
         let normalizer = get_normalizer();
 
-        let actual = normalizer
-            .execute(input)
-            .expect("normalization should succeed");
+        let actual = normalizer.execute(input).expect("Failed to normalize text");
         assert_eq!(
             actual,
             expected,

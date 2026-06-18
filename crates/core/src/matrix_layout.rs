@@ -1,8 +1,7 @@
-use crate::ElemType;
 use std::marker::PhantomData;
 use std::ops::Range;
 
-pub struct MatrixLayout<T: ElemType> {
+pub struct MatrixLayout<T> {
     pub offset: usize,
     pub nrow: u32,
     pub ncol: u32,
@@ -11,7 +10,7 @@ pub struct MatrixLayout<T: ElemType> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: ElemType> MatrixLayout<T> {
+impl<T> MatrixLayout<T> {
     pub fn new(offset: usize, nrow: u32, ncol: u32, row_stride: u32, col_stride: u32) -> Self {
         Self {
             offset,
@@ -24,8 +23,8 @@ impl<T: ElemType> MatrixLayout<T> {
     }
 
     pub fn rc_offset(&self, r: u32, c: u32) -> usize {
-        r as usize * self.row_stride as usize
-            + c as usize * self.col_stride as usize * size_of::<T>()
+        (r as usize * self.row_stride as usize + c as usize * self.col_stride as usize)
+            * size_of::<T>()
             + self.offset
     }
 

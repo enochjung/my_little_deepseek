@@ -55,6 +55,7 @@ dependencies = [
 name = "session"
 version = "0.2.0"
 dependencies = [
+ "config",
  "core",
  "inference",
 ]

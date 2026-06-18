@@ -1,4 +1,4 @@
-use core::{ElemType, MLTError, Memory, MemoryMut};
+use core::{BackendOps, ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
 
 use crate::rms_norm::RMSNorm;
 use crate::tensor::Tensor;
@@ -10,13 +10,16 @@ pub struct FeedForward<T: ElemType, M: Memory<T>> {
     down: Tensor<T, M>,
 }
 
-impl<T: ElemType, M: Memory<T>> FeedForward<T, M> {
+impl<T: ElemType, M: Memory<T>> FeedForward<T, M>
+where
+    <M::Base as MemoryOwn<T>>::Operator: BackendOps<T>,
+{
     pub fn new(
         norm: Tensor<T, M>,
         gate: Tensor<T, M>,
         up: Tensor<T, M>,
         down: Tensor<T, M>,
-        rms_norm_epsilon: T,
+        rms_norm_epsilon: f32,
     ) -> Self {
         let rms_norm = RMSNorm::new(norm, rms_norm_epsilon);
         Self {

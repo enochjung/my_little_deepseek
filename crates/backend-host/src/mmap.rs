@@ -1,4 +1,4 @@
-use core::{Backend, ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
+use core::{MLTError, Memory, MemoryMut, MemoryOwn};
 
 use crate::host::Host;
 
@@ -13,16 +13,6 @@ use std::os::fd::AsRawFd;
 ///
 /// In the current architecture, it serves safely as both the Embedding Device (`ED`)
 /// and Transformer Device (`TD`).
-///
-/// # Examples
-///
-/// ```no_run
-/// use my_little_deepseek::{Mmap, Model, F32, config::Configure};
-///
-/// // Initialize a model explicitly utilizing the Mmap for both embeddings and transformer layers
-/// let config = Configure::new();
-/// let model: Model<F32, Mmap, Mmap> = Model::new(config).unwrap();
-/// ```
 #[repr(C)]
 pub struct Mmap<T> {
     ptr: *mut T,
@@ -56,10 +46,10 @@ impl<T> Drop for Mmap<T> {
     }
 }
 
-unsafe impl<T: ElemType> Send for Mmap<T> {}
-unsafe impl<T: ElemType> Sync for Mmap<T> {}
+unsafe impl<T> Send for Mmap<T> {}
+unsafe impl<T> Sync for Mmap<T> {}
 
-impl<T: ElemType> Memory<T> for Mmap<T> {
+impl<T> Memory<T> for Mmap<T> {
     type Base = Self;
 
     fn as_base(&self) -> &Self::Base {
@@ -73,7 +63,7 @@ impl<T: ElemType> Memory<T> for Mmap<T> {
     }
 }
 
-impl<T: ElemType> MemoryMut<T> for Mmap<T> {
+impl<T> MemoryMut<T> for Mmap<T> {
     fn as_mut_base(&mut self) -> &mut Self::Base {
         self
     }
@@ -82,11 +72,8 @@ impl<T: ElemType> MemoryMut<T> for Mmap<T> {
     }
 }
 
-impl<T: ElemType> MemoryOwn<T> for Mmap<T>
-where
-    Host<T>: Backend<T>,
-{
-    type Backend = Host<T>;
+impl<T> MemoryOwn<T> for Mmap<T> {
+    type Operator = Host<T>;
 
     fn new(size: usize) -> Result<Self, MLTError> {
         let size = size.next_multiple_of(size_of::<T>());

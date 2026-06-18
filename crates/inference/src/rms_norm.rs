@@ -1,14 +1,17 @@
-use core::{ElemType, MLTError, Memory, MemoryMut};
+use core::{BackendOps, ElemType, MLTError, Memory, MemoryMut, MemoryOwn};
 
 use crate::tensor::Tensor;
 
 pub struct RMSNorm<T: ElemType, M: Memory<T>> {
     norm: Tensor<T, M>,
-    epsilon: T,
+    epsilon: f32,
 }
 
-impl<T: ElemType, M: Memory<T>> RMSNorm<T, M> {
-    pub fn new(norm: Tensor<T, M>, epsilon: T) -> Self {
+impl<T: ElemType, M: Memory<T>> RMSNorm<T, M>
+where
+    <M::Base as MemoryOwn<T>>::Operator: BackendOps<T>,
+{
+    pub fn new(norm: Tensor<T, M>, epsilon: f32) -> Self {
         Self { norm, epsilon }
     }
 

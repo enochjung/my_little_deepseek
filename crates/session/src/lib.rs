@@ -1,6 +1,6 @@
 mod special_token;
 
-use core::{Backend, ElemType, MLTError, MemoryOwn};
+use core::{Backend, BackendOps, ElemType, MLTError, MemoryOwn};
 use inference::{KVCache, Model};
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,19 +15,17 @@ use std::sync::{Arc, mpsc};
 /// # Examples
 ///
 /// ```no_run
-/// use my_little_deepseek::{Model, Session, config::Configure};
-///
-/// let config = Configure::new();
-/// let model = Model::new(config).unwrap();
-/// let mut session = model.new_session().unwrap();
+/// let config = config::Configure::new();
+/// let model = inference::Model::new(config).unwrap();
+/// let mut session = session::Session::new(&model).unwrap();
 /// ```
-pub struct Session<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> {
+pub struct Session<'model, T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>> {
     model: &'model Model<T, EB, TB>,
     tokens: Vec<u32>,
-    kv_caches: Vec<KVCache<T, TB::Memory>>,
+    kv_caches: Vec<KVCache<T, TB::Operand>>,
 }
 
-impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB, TB> {
+impl<'model, T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>> Session<'model, T, EB, TB> {
     /// Creates a new, stateful inference session bound to this model.
     ///
     /// The resulting [`Session`] will allocate its own isolated KV Cache and maintain
@@ -37,11 +35,9 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::{Model, config::Configure};
-    ///
-    /// let config = Configure::new();
-    /// let model = Model::new(config).unwrap();
-    /// let session = model.new_session().unwrap();
+    /// # let config = config::Configure::new();
+    /// # let model = inference::Model::new(config).unwrap();
+    /// let session = session::Session::new(&model).unwrap();
     /// ```
     pub fn new(model: &'model Model<T, EB, TB>) -> Result<Self, MLTError> {
         const INITIAL_N: usize = 1024;
@@ -49,10 +45,10 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
         let tokens = vec![special_token::BEGIN_OF_SENTENCE; 1];
         let kv_caches = (0..model.num_hidden_layers)
             .map(|_| {
-                let k_mem = TB::Memory::new(
+                let k_mem = TB::Operand::new(
                     INITIAL_N * model.head_size as usize * model.num_key_value_heads,
                 )?;
-                let v_mem = TB::Memory::new(
+                let v_mem = TB::Operand::new(
                     INITIAL_N * model.head_size as usize * model.num_key_value_heads,
                 )?;
                 KVCache::new(k_mem, v_mem, model.head_size, model.num_key_value_heads, 0)
@@ -74,11 +70,9 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::{Model, config::Configure};
-    ///
-    /// let config = Configure::new();
-    /// let model = Model::new(config).unwrap();
-    /// let session = model.new_session().unwrap();
+    /// let config = config::Configure::new();
+    /// let model = inference::Model::new(config).unwrap();
+    /// let session = session::Session::new(&model).unwrap();
     ///
     /// std::thread::scope(|s| {
     ///     let task = session.send_prompt(s, "Explain quantum computing").unwrap();
@@ -91,7 +85,7 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
     ) -> Result<SessionTask<'model, T, EB, TB>, MLTError>
     where
         'model: 'scope,
-        TB: Backend<T, Memory = EB::Memory>, // TODO
+        TB: Backend<T, Operand = EB::Operand>, // TODO
     {
         let Self {
             model,
@@ -143,12 +137,11 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
 /// # Examples
 ///
 /// ```no_run
-/// use my_little_deepseek::{Model, config::Configure};
 /// use std::time::Duration;
 ///
-/// let config = Configure::new();
-/// let model = Model::new(config).unwrap();
-/// let session = model.new_session().unwrap();
+/// let config = config::Configure::new();
+/// let model = inference::Model::new(config).unwrap();
+/// let session = session::Session::new(&model).unwrap();
 ///
 /// std::thread::scope(|s| {
 ///     let mut task = session.send_prompt(s, "Hello!").unwrap();
@@ -163,17 +156,17 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> Session<'model, T, EB,
 ///     let _session = task.finish_decoding().unwrap();
 /// });
 /// ```
-pub struct SessionTask<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> {
+pub struct SessionTask<'model, T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>> {
     model: &'model Model<T, EB, TB>,
     tokens: Vec<u32>,
     decoded_cursor: usize,
     abort_flag: Arc<AtomicBool>,
     finished_flag: Arc<AtomicBool>,
     token_rx: mpsc::Receiver<u32>,
-    kv_rx: mpsc::Receiver<Result<Vec<KVCache<T, TB::Memory>>, MLTError>>,
+    kv_rx: mpsc::Receiver<Result<Vec<KVCache<T, TB::Operand>>, MLTError>>,
 }
 
-impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> SessionTask<'model, T, EB, TB> {
+impl<'model, T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>> SessionTask<'model, T, EB, TB> {
     /// Returns `true` if the background generation thread has completed its execution.
     ///
     /// This occurs when the model emits a stop token, reaches the maximum sequence length,
@@ -182,10 +175,9 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> SessionTask<'model, T,
     /// # Examples
     ///
     /// ```no_run
-    /// # use my_little_deepseek::{Model, config::Configure};
-    /// # let config = Configure::new();
-    /// # let model = Model::new(config).unwrap();
-    /// # let session = model.new_session().unwrap();
+    /// # let config = config::Configure::new();
+    /// # let model = inference::Model::new(config).unwrap();
+    /// # let session = session::Session::new(&model).unwrap();
     /// # std::thread::scope(|s| {
     /// # let task = session.send_prompt(s, "Hi").unwrap();
     /// if task.is_finished() {
@@ -206,10 +198,9 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> SessionTask<'model, T,
     /// # Examples
     ///
     /// ```no_run
-    /// # use my_little_deepseek::{Model, config::Configure};
-    /// # let config = Configure::new();
-    /// # let model = Model::new(config).unwrap();
-    /// # let session = model.new_session().unwrap();
+    /// # let config = config::Configure::new();
+    /// # let model = inference::Model::new(config).unwrap();
+    /// # let session = session::Session::new(&model).unwrap();
     /// # std::thread::scope(|s| {
     /// # let task = session.send_prompt(s, "Hi").unwrap();
     /// // Interrupt or finish the current task
@@ -249,10 +240,9 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> SessionTask<'model, T,
     /// # Examples
     ///
     /// ```no_run
-    /// # use my_little_deepseek::{Model, config::Configure};
-    /// # let config = Configure::new();
-    /// # let model = Model::new(config).unwrap();
-    /// # let session = model.new_session().unwrap();
+    /// # let config = config::Configure::new();
+    /// # let model = inference::Model::new(config).unwrap();
+    /// # let session = session::Session::new(&model).unwrap();
     /// # std::thread::scope(|s| {
     /// # let mut task = session.send_prompt(s, "Hi").unwrap();
     /// if let Some(text) = task.get_next_string() {
@@ -286,7 +276,7 @@ impl<'model, T: ElemType, EB: Backend<T>, TB: Backend<T>> SessionTask<'model, T,
     }
 }
 
-impl<'a, T: ElemType, EB: Backend<T>, TB: Backend<T>> Drop for SessionTask<'a, T, EB, TB> {
+impl<'a, T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>> Drop for SessionTask<'a, T, EB, TB> {
     fn drop(&mut self) {
         self.abort_flag.store(true, Ordering::Release);
     }
@@ -320,15 +310,15 @@ fn render_special_token(token: u32) -> Option<String> {
     })
 }
 
-fn run<T: ElemType, EB: Backend<T>, TB: Backend<T>>(
+fn run<T: ElemType, EB: BackendOps<T>, TB: BackendOps<T>>(
     model: &Model<T, EB, TB>,
     tokens: Vec<u32>,
-    mut kv_caches: Vec<KVCache<T, TB::Memory>>,
+    mut kv_caches: Vec<KVCache<T, TB::Operand>>,
     abort_flag: Arc<AtomicBool>,
     transmitter: mpsc::Sender<u32>,
-) -> Result<Vec<KVCache<T, TB::Memory>>, MLTError>
+) -> Result<Vec<KVCache<T, TB::Operand>>, MLTError>
 where
-    TB: Backend<T, Memory = EB::Memory>, // TODO
+    TB: Backend<T, Operand = EB::Operand>, // TODO
 {
     let next_token = model.decode(&mut kv_caches, &tokens)?;
     if transmitter.send(next_token).is_err() {

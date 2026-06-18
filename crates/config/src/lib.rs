@@ -1,4 +1,4 @@
-#![feature(f16)]
+#![feature(stdarch_x86_avx512_bf16)]
 
 mod composition_exclusion;
 mod merge;
@@ -25,8 +25,6 @@ use core::MLTError;
 /// # Examples
 ///
 /// ```no_run
-/// use my_little_deepseek::{config, Model};
-///
 /// let config = config::Configure::new()
 ///     .unicode_format(config::UnicodeFormat::UnicodeCharacterDatabase {
 ///         path: "path/to/UnicodeData.txt".to_string(),
@@ -47,9 +45,6 @@ use core::MLTError;
 ///     })
 ///     .num_hidden_layers(28)
 ///     .hidden_size(1536);
-///
-/// // The configuration is now ready to be used by the Model
-/// let model = Model::new(config).expect("model initialization failed");
 /// ```
 pub struct Configure {
     pub unicode_format: Option<UnicodeFormat>,
@@ -81,7 +76,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new();
     /// ```
@@ -108,7 +103,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::{Configure, UnicodeFormat};
+    /// use config::{Configure, UnicodeFormat};
     ///
     /// let config = Configure::new().unicode_format(
     ///     UnicodeFormat::UnicodeCharacterDatabase { path: "path/to/unicode.txt".to_string() }
@@ -124,7 +119,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::{Configure, CompositionExclusionFormat};
+    /// use config::{Configure, CompositionExclusionFormat};
     ///
     /// let config = Configure::new().composition_exclusion_format(
     ///     CompositionExclusionFormat::UnicodeCharacterDatabase { path: "path/to/exclusion.txt".to_string() }
@@ -140,7 +135,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::{Configure, MergeFormat};
+    /// use config::{Configure, MergeFormat};
     ///
     /// let config = Configure::new().merge_format(
     ///     MergeFormat::HuggingFace { path: "path/to/merges.json".to_string() }
@@ -156,7 +151,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::{Configure, VocabFormat};
+    /// use config::{Configure, VocabFormat};
     ///
     /// let config = Configure::new().vocab_format(
     ///     VocabFormat::HuggingFace { path: "path/to/vocab.json".to_string() }
@@ -172,7 +167,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::{Configure, WeightFormat};
+    /// use config::{Configure, WeightFormat};
     ///
     /// let config = Configure::new().weight_format(
     ///     WeightFormat::Safetensor { path: "path/to/model.safetensors".to_string() }
@@ -188,7 +183,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().num_hidden_layers(32);
     /// ```
@@ -202,7 +197,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().num_attention_heads(16);
     /// ```
@@ -216,7 +211,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().num_key_value_heads(4);
     /// ```
@@ -230,7 +225,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().rms_norm_epsilon(1e-5);
     /// ```
@@ -244,7 +239,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().hidden_size(2048);
     /// ```
@@ -258,7 +253,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().intermediate_size(8192);
     /// ```
@@ -272,7 +267,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().rope_theta(5000.0);
     /// ```
@@ -286,7 +281,7 @@ impl Configure {
     /// # Examples
     ///
     /// ```no_run
-    /// use my_little_deepseek::config::Configure;
+    /// use config::Configure;
     ///
     /// let config = Configure::new().vocab_size(151936);
     /// ```

@@ -61,6 +61,15 @@ impl MLTError {
             kind: ErrorKind::InsufficientStorageSpace { required, actual },
         }
     }
+
+    pub fn matrix_layout_mismatch(expected_row: bool, actual_row: bool) -> Self {
+        Self {
+            kind: ErrorKind::MatrixLayoutMismatch {
+                expected_row,
+                actual_row,
+            },
+        }
+    }
 }
 
 impl std::error::Error for MLTError {}
@@ -90,6 +99,11 @@ enum ErrorKind {
     ConfigureFailed { field: String },
     /// Insufficient storage space was available to accommodate the required data.
     InsufficientStorageSpace { required: usize, actual: usize },
+    /// The matrix layout state does not match the expected layout.
+    MatrixLayoutMismatch {
+        expected_row: bool,
+        actual_row: bool,
+    },
 }
 
 impl std::fmt::Display for ErrorKind {
@@ -117,6 +131,25 @@ impl std::fmt::Display for ErrorKind {
                 f,
                 "insufficient storage space: required {required} bytes, got {actual} bytes"
             ),
+            Self::MatrixLayoutMismatch {
+                expected_row,
+                actual_row,
+            } => {
+                let expected = if *expected_row {
+                    "row-major"
+                } else {
+                    "column-major"
+                };
+                let actual = if *actual_row {
+                    "row-major"
+                } else {
+                    "column-major"
+                };
+                write!(
+                    f,
+                    "matrix layout mismatch: expected {expected}, got {actual}"
+                )
+            }
         }
     }
 }

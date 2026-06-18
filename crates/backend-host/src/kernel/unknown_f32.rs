@@ -41,97 +41,6 @@ pub unsafe fn elem_add_assign_rmn_cmn(
     }
 }
 
-// y[0..n] = a[0..n] + b[0..n]
-pub unsafe fn elem_add(y: *mut f32, a: *const f32, b: *const f32, n: usize) {
-    for i in 0..n {
-        unsafe { *y.add(i) = *a.add(i) + *b.add(i) };
-    }
-}
-
-// y = a + b
-pub unsafe fn elem_add_rmn_rmn_rmn(
-    y: *mut f32,
-    ldy: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    m: usize,
-    n: usize,
-) {
-    for i in 0..m {
-        for j in 0..n {
-            unsafe {
-                *y.add(i * ldy as usize + j) =
-                    *a.add(i * lda as usize + j) + *b.add(i * ldb as usize + j)
-            };
-        }
-    }
-}
-
-// y = a + b
-pub unsafe fn elem_add_rmn_rmn_cmn(
-    y: *mut f32,
-    ldy: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    m: usize,
-    n: usize,
-) {
-    for i in 0..m {
-        for j in 0..n {
-            unsafe {
-                *y.add(i * ldy as usize + j) =
-                    *a.add(i * lda as usize + j) + *b.add(j * ldb as usize + i)
-            };
-        }
-    }
-}
-
-// y = a + b
-pub unsafe fn elem_add_rmn_cmn_rmn(
-    y: *mut f32,
-    ldy: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    m: usize,
-    n: usize,
-) {
-    for i in 0..m {
-        for j in 0..n {
-            unsafe {
-                *y.add(i * ldy as usize + j) =
-                    *a.add(j * lda as usize + i) + *b.add(i * ldb as usize + j)
-            };
-        }
-    }
-}
-
-// y = a + b
-pub unsafe fn elem_add_rmn_cmn_cmn(
-    y: *mut f32,
-    ldy: u32,
-    a: *const f32,
-    lda: u32,
-    b: *const f32,
-    ldb: u32,
-    m: usize,
-    n: usize,
-) {
-    for i in 0..m {
-        for j in 0..n {
-            unsafe {
-                *y.add(i * ldy as usize + j) =
-                    *a.add(j * lda as usize + i) + *b.add(j * ldb as usize + i)
-            };
-        }
-    }
-}
-
 // res = i where max(x[0..n]) == x[i] (any i)
 pub unsafe fn argmax(x: *const f32, n: usize) -> u32 {
     let mut max_val = f32::NEG_INFINITY;
@@ -524,9 +433,11 @@ pub unsafe fn rope_sin(y: *mut f32, k: f32, theta: f32, d: f32, n: usize) {
 }
 
 // y = safe_softmax(y)
-pub unsafe fn safe_softmax(y: *mut f32, n: usize) {
+pub unsafe fn masked_safe_softmax(y: *mut f32, n_mask: usize, n: usize) {
+    let end = n - n_mask;
+
     let mut max_val = f32::NEG_INFINITY;
-    for i in 0..n {
+    for i in 0..end {
         let v = unsafe { *y.add(i) };
         if v > max_val {
             max_val = v;
@@ -534,15 +445,18 @@ pub unsafe fn safe_softmax(y: *mut f32, n: usize) {
     }
 
     let mut sum = 0.0;
-    for i in 0..n {
+    for i in 0..end {
         let exp_v = (unsafe { *y.add(i) } - max_val).exp();
         unsafe { *y.add(i) = exp_v };
         sum += exp_v;
     }
 
     let multiplier = 1.0 / sum;
-    for i in 0..n {
+    for i in 0..end {
         unsafe { *y.add(i) *= multiplier };
+    }
+    for i in end..n {
+        unsafe { *y.add(i) = 0.0 };
     }
 }
 

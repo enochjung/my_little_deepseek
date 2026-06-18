@@ -1,4 +1,4 @@
-use core::{ElemType, MLTError, MemoryMut};
+use core::{BackendOps, ElemType, MLTError, MemoryMut, MemoryOwn};
 
 use crate::tensor::Tensor;
 
@@ -9,7 +9,10 @@ pub struct RoPE<'a, T: ElemType, MM: MemoryMut<T>> {
     head_size: u32,
 }
 
-impl<'a, T: ElemType, MM: MemoryMut<T>> RoPE<'a, T, MM> {
+impl<'a, T: ElemType, MM: MemoryMut<T>> RoPE<'a, T, MM>
+where
+    <MM::Base as MemoryOwn<T>>::Operator: BackendOps<T>,
+{
     pub fn new(
         tmp_1_x_d: &'a mut Tensor<T, MM>,
         token_index: u32,

@@ -6,7 +6,7 @@ mod error;
 mod matrix_layout;
 mod memory;
 
-pub use backend::Backend;
+pub use backend::{Backend, BackendOps};
 pub use elem_type::ElemType;
 pub use error::MLTError;
 pub use matrix_layout::MatrixLayout;
