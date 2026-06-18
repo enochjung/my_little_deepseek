@@ -3,14 +3,58 @@
 version = 4
 
 [[package]]
+name = "backend-cuda"
+version = "0.2.0"
+
+[[package]]
+name = "backend-host"
+version = "0.2.0"
+dependencies = [
+ "core",
+ "libc",
+]
+
+[[package]]
+name = "config"
+version = "0.2.0"
+dependencies = [
+ "backend-host",
+ "core",
+]
+
+[[package]]
+name = "core"
+version = "0.2.0"
+
+[[package]]
+name = "inference"
+version = "0.2.0"
+dependencies = [
+ "backend-host",
+ "config",
+ "core",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "my_little_deepseek"
-version = "0.1.0"
+name = "main"
+version = "0.2.0"
 dependencies = [
- "libc",
+ "backend-host",
+ "config",
+ "inference",
+ "session",
+]
+
+[[package]]
+name = "session"
+version = "0.2.0"
+dependencies = [
+ "core",
+ "inference",
 ]

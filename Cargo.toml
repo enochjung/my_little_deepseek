@@ -1,8 +1,30 @@
-[package]
-name = "my_little_deepseek"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85.1"
+[workspace]
+members = [
+    "crates/backend-cuda",
+    "crates/backend-host",
+    "crates/config",
+    "crates/core",
+    "crates/inference",
+    "crates/main",
+    "crates/session",
+]
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+edition = "2024"
+authors = ["Enoch Jung (@enochjung)"]
+
+[workspace.dependencies]
 libc = "0.2.186"
+cuda-async = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-async" }
+cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-core" }
+cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-device" }
+cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-host" }
+
+backend-cuda = { path = "crates/backend-cuda" }
+backend-host = { path = "crates/backend-host" }
+config = { path = "crates/config" }
+core = { path = "crates/core" }
+inference = { path = "crates/inference" }
+main = { path = "crates/main" }
+session = { path = "crates/session" }

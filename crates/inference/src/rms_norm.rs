@@ -1,0 +1,21 @@
+use core::{ElemType, MLTError, Memory, MemoryMut};
+
+use crate::tensor::Tensor;
+
+pub struct RMSNorm<T: ElemType, M: Memory<T>> {
+    norm: Tensor<T, M>,
+    epsilon: T,
+}
+
+impl<T: ElemType, M: Memory<T>> RMSNorm<T, M> {
+    pub fn new(norm: Tensor<T, M>, epsilon: T) -> Self {
+        Self { norm, epsilon }
+    }
+
+    pub fn execute<D: MemoryMut<T, Base = M::Base>>(
+        &self,
+        target_r_x_h: &mut Tensor<T, D>,
+    ) -> Result<(), MLTError> {
+        target_r_x_h.rms_norm(&self.norm, self.epsilon)
+    }
+}

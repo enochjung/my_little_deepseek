@@ -1,0 +1,11 @@
+[package]
+name = "main"
+version = "0.2.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+backend-host.workspace = true
+config.workspace = true
+inference.workspace = true
+session.workspace = true

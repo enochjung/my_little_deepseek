@@ -1,0 +1,9 @@
+[package]
+name = "config"
+version = "0.2.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+backend-host.workspace = true
+core.workspace = true

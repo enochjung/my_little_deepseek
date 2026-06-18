@@ -1,0 +1,9 @@
+[package]
+name = "session"
+version = "0.2.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+core.workspace = true
+inference.workspace = true
