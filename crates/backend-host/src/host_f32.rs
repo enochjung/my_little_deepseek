@@ -1,20 +1,22 @@
-use core::{BackendOps, ElemType, MatrixLayout, Memory, MemoryMut};
+use common::{Backend, MatrixLayout, Memory, MemoryMut};
 
-use crate::host::Host;
+use crate::mem::HostMem;
 
 #[cfg(target_feature = "avx512f")]
 use crate::kernel::avx512_f32 as Kernel;
 #[cfg(not(target_feature = "avx512f"))]
 use crate::kernel::unknown_f32 as Kernel;
 
-impl BackendOps<f32> for Host<f32> {
-    unsafe fn elem_add_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+pub struct HostF32;
+
+impl Backend for HostF32 {
+    type Item = f32;
+    type Mem = HostMem<f32>;
+
+    unsafe fn elem_add_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -57,13 +59,10 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn elem_br_add_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn elem_br_add_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -91,22 +90,16 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn argmax<S0: Memory<f32, Base = Self::Operand>>(
-        src: &S0,
-        src_ml: &MatrixLayout<f32>,
-    ) -> u32 {
+    unsafe fn argmax(src: &Self::Mem, src_ml: &MatrixLayout<f32>) -> u32 {
         let n = src_ml.ncol as usize;
         let src_ptr = unsafe { src.as_ptr().byte_add(src_ml.offset) };
         unsafe { Kernel::argmax(src_ptr, n) }
     }
 
-    unsafe fn copy<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn copy(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -141,11 +134,7 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn fill<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
-        dst_ml: &MatrixLayout<f32>,
-        value: f32,
-    ) {
+    unsafe fn fill(dst: &mut Self::Mem, dst_ml: &MatrixLayout<f32>, value: f32) {
         let m = dst_ml.nrow as usize;
         let n = dst_ml.ncol as usize;
         let dst_ptr = unsafe { dst.as_mut_ptr().byte_add(dst_ml.offset) };
@@ -172,11 +161,7 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn scalar_mul_assign<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
-        dst_ml: &MatrixLayout<f32>,
-        value: f32,
-    ) {
+    unsafe fn scalar_mul_assign(dst: &mut Self::Mem, dst_ml: &MatrixLayout<f32>, value: f32) {
         let m = dst_ml.nrow as usize;
         let n = dst_ml.ncol as usize;
         let dst_ptr = unsafe { dst.as_mut_ptr().byte_add(dst_ml.offset) };
@@ -203,16 +188,12 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn elem_mul<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-        S1: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn elem_mul(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src0: &S0,
+        src0: &Self::Mem,
         src0_ml: &MatrixLayout<f32>,
-        src1: &S1,
+        src1: &Self::Mem,
         src1_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -275,13 +256,10 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn elem_mul_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn elem_mul_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -324,16 +302,12 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn elem_muladd_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-        S1: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn elem_muladd_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src0: &S0,
+        src0: &Self::Mem,
         src0_ml: &MatrixLayout<f32>,
-        src1: &S1,
+        src1: &Self::Mem,
         src1_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -412,16 +386,12 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn elem_mulsub_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-        S1: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn elem_mulsub_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src0: &S0,
+        src0: &Self::Mem,
         src0_ml: &MatrixLayout<f32>,
-        src1: &S1,
+        src1: &Self::Mem,
         src1_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -500,16 +470,12 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn matmul<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-        S1: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn matmul(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src0: &S0,
+        src0: &Self::Mem,
         src0_ml: &MatrixLayout<f32>,
-        src1: &S1,
+        src1: &Self::Mem,
         src1_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -573,13 +539,10 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn matmul_assign<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn matmul_assign(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
     ) {
         let m = dst_ml.nrow as usize;
@@ -618,13 +581,10 @@ impl BackendOps<f32> for Host<f32> {
         }
     }
 
-    unsafe fn rms_norm<
-        D: MemoryMut<f32, Base = Self::Operand>,
-        S0: Memory<f32, Base = Self::Operand>,
-    >(
-        dst: &mut D,
+    unsafe fn rms_norm(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
-        src: &S0,
+        src: &Self::Mem,
         src_ml: &MatrixLayout<f32>,
         epsilon: f32,
     ) {
@@ -637,15 +597,15 @@ impl BackendOps<f32> for Host<f32> {
 
         for i in 0..m {
             let y = unsafe { y.add(i * ldy) };
-            let rms_val = unsafe { Kernel::rms(y, n) }.to_f32();
+            let rms_val = unsafe { Kernel::rms(y, n) };
             let multiplier = 1.0 / (rms_val + epsilon);
-            unsafe { Kernel::scalar_mul_assign(y, f32::from_f32(multiplier), n) };
+            unsafe { Kernel::scalar_mul_assign(y, multiplier, n) };
             unsafe { Kernel::elem_mul_assign(y, a, n) };
         }
     }
 
-    unsafe fn rope_cos<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
+    unsafe fn rope_cos(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
         k: f32,
         theta: f32,
@@ -656,8 +616,8 @@ impl BackendOps<f32> for Host<f32> {
         unsafe { Kernel::rope_cos(dst_ptr, k, theta, d, n) };
     }
 
-    unsafe fn rope_sin<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
+    unsafe fn rope_sin(
+        dst: &mut Self::Mem,
         dst_ml: &MatrixLayout<f32>,
         k: f32,
         theta: f32,
@@ -668,21 +628,14 @@ impl BackendOps<f32> for Host<f32> {
         unsafe { Kernel::rope_sin(dst_ptr, k, theta, d, n) };
     }
 
-    unsafe fn masked_safe_softmax<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
-        dst_ml: &MatrixLayout<f32>,
-        n_mask: u32,
-    ) {
+    unsafe fn masked_safe_softmax(dst: &mut Self::Mem, dst_ml: &MatrixLayout<f32>, n_mask: u32) {
         let n = dst_ml.ncol as usize;
         let n_mask = n_mask as usize;
         let y = unsafe { dst.as_mut_ptr().byte_add(dst_ml.offset) };
         unsafe { Kernel::masked_safe_softmax(y, n_mask, n) };
     }
 
-    unsafe fn silu<D: MemoryMut<f32, Base = Self::Operand>>(
-        dst: &mut D,
-        dst_ml: &MatrixLayout<f32>,
-    ) {
+    unsafe fn silu(dst: &mut Self::Mem, dst_ml: &MatrixLayout<f32>) {
         let m = dst_ml.nrow as usize;
         let n = dst_ml.ncol as usize;
         let dst_ptr = unsafe { dst.as_mut_ptr().byte_add(dst_ml.offset) };

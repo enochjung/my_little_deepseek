@@ -6,5 +6,5 @@ authors.workspace = true
 
 [dependencies]
 config.workspace = true
-core.workspace = true
+common.workspace = true
 inference.workspace = true

@@ -7,4 +7,4 @@ authors.workspace = true
 [dependencies]
 backend-host.workspace = true
 config.workspace = true
-core.workspace = true
+common.workspace = true

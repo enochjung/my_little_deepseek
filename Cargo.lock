@@ -5,34 +5,37 @@ version = 4
 [[package]]
 name = "backend-cuda"
 version = "0.2.0"
+dependencies = [
+ "common",
+]
 
 [[package]]
 name = "backend-host"
 version = "0.2.0"
 dependencies = [
- "core",
+ "common",
  "libc",
 ]
+
+[[package]]
+name = "common"
+version = "0.2.0"
 
 [[package]]
 name = "config"
 version = "0.2.0"
 dependencies = [
  "backend-host",
- "core",
+ "common",
 ]
-
-[[package]]
-name = "core"
-version = "0.2.0"
 
 [[package]]
 name = "inference"
 version = "0.2.0"
 dependencies = [
  "backend-host",
+ "common",
  "config",
- "core",
 ]
 
 [[package]]
@@ -55,7 +58,7 @@ dependencies = [
 name = "session"
 version = "0.2.0"
 dependencies = [
+ "common",
  "config",
- "core",
  "inference",
 ]

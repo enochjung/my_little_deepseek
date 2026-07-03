@@ -1,9 +1,8 @@
 use backend_host::Mmap;
-use core::MLTError;
+use core::{BF16, MLTError};
 
 use crate::Format;
 
-use std::arch::x86_64::bf16;
 use std::fs::File;
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -20,7 +19,7 @@ pub enum WeightFormat {
 }
 
 impl Format for WeightFormat {
-    type Output = WeightInfo<bf16>;
+    type Output = WeightInfo<BF16>;
     type Parser = fn(&Mmap<u8>) -> Box<dyn Iterator<Item = Self::Output> + '_>;
 
     fn read(&self) -> Result<(Mmap<u8>, Self::Parser), MLTError> {
@@ -36,15 +35,15 @@ impl Format for WeightFormat {
 
 mod safetensor {
     use backend_host::Mmap;
+    use core::BF16;
 
     use super::WeightInfo;
 
-    use std::arch::x86_64::bf16;
     use std::marker::PhantomData;
 
     const HLEN_END_OFFSET: usize = 8;
 
-    pub fn parse(file: &Mmap<u8>) -> Box<dyn Iterator<Item = WeightInfo<bf16>> + '_> {
+    pub fn parse(file: &Mmap<u8>) -> Box<dyn Iterator<Item = WeightInfo<BF16>> + '_> {
         let raw = file.as_slice();
 
         let (header_start, weight_start) = section_offsets(raw);
@@ -165,7 +164,7 @@ mod safetensor {
         res
     }
 
-    fn parse_tensor_info(section: Section, additional_offset: usize) -> WeightInfo<bf16> {
+    fn parse_tensor_info(section: Section, additional_offset: usize) -> WeightInfo<BF16> {
         let name = unsafe { std::str::from_utf8_unchecked(section.name) }.to_string();
         let mut parser = SectionIter::new(section.body);
 
@@ -192,10 +191,11 @@ mod safetensor {
 
 #[cfg(test)]
 mod tests {
+    use core::BF16;
+
     use super::{WeightFormat, WeightInfo};
     use crate::Format;
 
-    use std::arch::x86_64::bf16;
     use std::collections::HashMap;
     use std::ops::Range;
     use std::sync::OnceLock;
@@ -203,9 +203,9 @@ mod tests {
     const WEIGHT_PATH: &'static str = "../../model/model.safetensors";
     const OFFSET: usize = 38621;
 
-    static PRECOMPUTED_TENSOR_INFO: OnceLock<HashMap<String, WeightInfo<bf16>>> = OnceLock::new();
+    static PRECOMPUTED_TENSOR_INFO: OnceLock<HashMap<String, WeightInfo<BF16>>> = OnceLock::new();
 
-    fn get_tensor_info() -> &'static HashMap<String, WeightInfo<bf16>> {
+    fn get_tensor_info() -> &'static HashMap<String, WeightInfo<BF16>> {
         PRECOMPUTED_TENSOR_INFO.get_or_init(|| {
             let weight_format = WeightFormat::Safetensor {
                 path: WEIGHT_PATH.to_string(),

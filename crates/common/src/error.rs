@@ -5,28 +5,20 @@
 /// structured information to help debug issues related to data integrity,
 /// configuration, and resource constraints.
 #[derive(Debug)]
-pub struct MLTError {
+pub struct Error {
     kind: ErrorKind,
 }
 
-impl MLTError {
-    pub fn io(err: std::io::Error) -> Self {
-        Self {
-            kind: ErrorKind::Io { err },
-        }
-    }
-
+impl Error {
     pub fn broken_data(line: usize) -> Self {
         Self {
             kind: ErrorKind::BrokenData { line },
         }
     }
 
-    pub fn data_not_provided(name: &str) -> Self {
+    pub fn data_not_provided(name: &'static str) -> Self {
         Self {
-            kind: ErrorKind::DataNotProvided {
-                name: name.to_string(),
-            },
+            kind: ErrorKind::DataNotProvided { name },
         }
     }
 
@@ -48,11 +40,9 @@ impl MLTError {
         }
     }
 
-    pub fn configure_failed(field: &str) -> Self {
+    pub fn configure_failed(field: &'static str) -> Self {
         Self {
-            kind: ErrorKind::ConfigureFailed {
-                field: field.to_string(),
-            },
+            kind: ErrorKind::ConfigureFailed { field },
         }
     }
 
@@ -70,12 +60,24 @@ impl MLTError {
             },
         }
     }
+
+    pub fn memory_allocation_failed(size: usize) -> Self {
+        Self {
+            kind: ErrorKind::MemoryAllocationFailed { size },
+        }
+    }
+
+    pub fn raw_os_error(raw_os_error: Option<i32>) -> Self {
+        Self {
+            kind: ErrorKind::RawOsError { raw_os_error },
+        }
+    }
+
 }
 
-impl std::error::Error for MLTError {}
-
-impl std::fmt::Display for MLTError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::error::Error for Error {}
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.kind)
     }
 }
@@ -83,12 +85,10 @@ impl std::fmt::Display for MLTError {
 /// A list of possible error categories that can occur in the library.
 #[derive(Debug)]
 enum ErrorKind {
-    /// An error occurred during I/O operations.
-    Io { err: std::io::Error },
     /// The input data is corrupted or malformed at the specified line.
     BrokenData { line: usize },
     /// Required data for the specified name is missing.
-    DataNotProvided { name: String },
+    DataNotProvided { name: &'static str },
     /// An invalid Unicode character codepoint was encountered.
     InvalidChar { codepoint: u32 },
     /// The shape of the tensor does not match the expected dimensions.
@@ -96,7 +96,7 @@ enum ErrorKind {
     /// An attempt was made to access data outside the valid range.
     OutOfBound { index: usize, limit: usize },
     /// Configuration initialization failed for the specified field.
-    ConfigureFailed { field: String },
+    ConfigureFailed { field: &'static str },
     /// Insufficient storage space was available to accommodate the required data.
     InsufficientStorageSpace { required: usize, actual: usize },
     /// The matrix layout state does not match the expected layout.
@@ -104,12 +104,15 @@ enum ErrorKind {
         expected_row: bool,
         actual_row: bool,
     },
+    /// Memory allocation failed for the requested size.
+    MemoryAllocationFailed { size: usize },
+    /// A raw OS error occurred.
+    RawOsError { raw_os_error: Option<i32> },
 }
 
-impl std::fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Io { err } => write!(f, "io error : {err}"),
             Self::BrokenData { line } => {
                 write!(f, "data broken at line {line}")
             }
@@ -150,6 +153,13 @@ impl std::fmt::Display for ErrorKind {
                     "matrix layout mismatch: expected {expected}, got {actual}"
                 )
             }
+            Self::MemoryAllocationFailed { size } => {
+                write!(f, "memory allocation failed: requested {size} bytes")
+            }
+            Self::RawOsError { raw_os_error } => match raw_os_error {
+                Some(raw_os_error) => write!(f, "raw OS error: {raw_os_error}"),
+                None => write!(f, "raw OS error"),
+            },
         }
     }
 }

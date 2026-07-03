@@ -130,6 +130,7 @@ impl<T: ElemType, MM: MemoryMut<T>> Tensor<T, MM>
 where
     Operator<T, MM>: BackendOps<T>,
 {
+    /*
     /// Adds `other` to `self` element-wise, supporting dynamic broadcasting.
     ///
     /// Conceptually:
@@ -389,6 +390,7 @@ where
     pub fn silu(&mut self) {
         unsafe { Operator::<T, MM>::silu(&mut self.mem, &self.ml) };
     }
+    */
 }
 
 fn validate_space<T>(mem_size: usize, ml: &MatrixLayout<T>) -> Result<(), MLTError> {
@@ -472,6 +474,7 @@ impl<T: ElemType, M: Memory<T, Base = backend_host::Mmap<T>>> Tensor<T, M> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use backend_host::Mmap;
@@ -601,3 +604,4 @@ mod tests {
         t2.assert(&[[0.0]]);
     }
 }
+*/

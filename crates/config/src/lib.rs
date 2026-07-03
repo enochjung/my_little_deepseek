@@ -1,5 +1,3 @@
-#![feature(stdarch_x86_avx512_bf16)]
-
 mod composition_exclusion;
 mod merge;
 mod unicode;

@@ -1,4 +1,4 @@
-#![feature(stdarch_x86_avx512_bf16)]
+//#![feature(stdarch_x86_avx512_bf16)]
 
 mod attention;
 mod feed_forward;
@@ -14,7 +14,7 @@ pub use kv_cache::KVCache;
 
 use backend_host::{Host, Mmap};
 use config::{Configure, Format, WeightInfo};
-use core::{Backend, BackendOps, ElemType, MLTError, MatrixLayout, MemoryMut, MemoryOwn};
+use core::{BF16, Backend, BackendOps, ElemType, MLTError, MatrixLayout, MemoryMut, MemoryOwn};
 
 use attention::{AttentionWeights, GroupedQueryAttention};
 use feed_forward::FeedForward;
@@ -23,7 +23,7 @@ use tensor::Tensor;
 use token_embedding::TokenEmbedding;
 use tokenizer::Tokenizer;
 
-use std::arch::x86_64::bf16;
+//use std::arch::x86_64::bf16;
 use std::collections::HashMap;
 
 /// Represents the immutable, stateless neural network definition and its loaded weights.
@@ -415,9 +415,10 @@ fn take_info<T>(
         .ok_or_else(|| MLTError::data_not_provided(name))
 }
 
+/*
 fn build_tensor<T: ElemType>(
     src_mem: &Mmap<u8>,
-    wi: WeightInfo<bf16>,
+    wi: WeightInfo<BF16>,
 ) -> Result<Tensor<T, Mmap<T>>, MLTError> {
     let (nrow, ncol) = match wi.shape.as_slice() {
         [] => return Err(MLTError::broken_data(0)),
@@ -436,6 +437,7 @@ fn build_tensor<T: ElemType>(
     let dst_ml = MatrixLayout::new(0, nrow, ncol, ncol, 1);
     Tensor::new(dst_mem, dst_ml)
 }
+    */
 
 #[cfg(test)]
 mod tests {

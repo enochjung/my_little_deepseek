@@ -1,11 +1,11 @@
 [workspace]
 members = [
+    "crates/app",
     "crates/backend-cuda",
     "crates/backend-host",
+    "crates/common",
     "crates/config",
-    "crates/core",
     "crates/inference",
-    "crates/main",
     "crates/session",
 ]
 resolver = "3"
@@ -21,10 +21,10 @@ cuda-core = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-
 cuda-device = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-device" }
 cuda-host = { git = "https://github.com/NVlabs/cuda-oxide.git", package = "cuda-host" }
 
+app = { path = "crates/app" }
 backend-cuda = { path = "crates/backend-cuda" }
 backend-host = { path = "crates/backend-host" }
+common = { path = "crates/common" }
 config = { path = "crates/config" }
-core = { path = "crates/core" }
 inference = { path = "crates/inference" }
-main = { path = "crates/main" }
 session = { path = "crates/session" }
