@@ -1,11 +1,13 @@
-use backend_host::Mmap;
-use core::{BF16, MLTError};
+use common::{BF16, Error};
 
 use crate::Format;
 
 use std::fs::File;
 use std::marker::PhantomData;
 use std::ops::Range;
+use std::os::unix::fs::FileExt;
+
+const HLEN_END_OFFSET: usize = 8;
 
 pub struct WeightInfo<T> {
     pub name: String,
@@ -19,179 +21,182 @@ pub enum WeightFormat {
 }
 
 impl Format for WeightFormat {
-    type Output = WeightInfo<BF16>;
-    type Parser = fn(&Mmap<u8>) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Item = Result<WeightInfo<BF16>, Error>;
+    type Parser = fn(&File) -> Box<dyn Iterator<Item = Self::Item> + '_>;
 
-    fn read(&self) -> Result<(Mmap<u8>, Self::Parser), MLTError> {
+    fn open(&self) -> Result<(File, Self::Parser), Error> {
         match &self {
             WeightFormat::Safetensor { path } => {
-                let file = File::open(path).map_err(MLTError::io)?;
-                let mem = Mmap::try_from(file)?;
-                Ok((mem, safetensor::parse))
+                let file =
+                    File::open(path).map_err(|err| Error::raw_os_error(err.raw_os_error()))?;
+                Ok((file, parse_safetensor))
             }
         }
     }
 }
 
-mod safetensor {
-    use backend_host::Mmap;
-    use core::BF16;
+fn parse_safetensor(file: &File) -> Box<dyn Iterator<Item = Result<WeightInfo<BF16>, Error>> + '_> {
+    let (header, weight_start) = match read_header(file) {
+        Ok(header) => header,
+        Err(err) => return Box::new(std::iter::once(Err(err))),
+    };
 
-    use super::WeightInfo;
+    Box::new(LineIter {
+        header,
+        weight_start,
+        pos: 0,
+    })
+}
 
-    use std::marker::PhantomData;
-
-    const HLEN_END_OFFSET: usize = 8;
-
-    pub fn parse(file: &Mmap<u8>) -> Box<dyn Iterator<Item = WeightInfo<BF16>> + '_> {
-        let raw = file.as_slice();
-
-        let (header_start, weight_start) = section_offsets(raw);
-
-        let header = &raw[header_start..weight_start];
-        let iter = SectionIter::new(header);
-
-        Box::new(
-            iter.filter(is_not_metadata)
-                .map(move |section| parse_tensor_info(section, weight_start)),
-        )
+fn read_header(file: &File) -> Result<(Vec<u8>, usize), Error> {
+    let mut hlen_bytes = [0; HLEN_END_OFFSET];
+    let read = file
+        .read_at(&mut hlen_bytes, 0)
+        .map_err(|err| Error::raw_os_error(err.raw_os_error()))?;
+    if read < hlen_bytes.len() {
+        return Err(Error::broken_data(0));
     }
 
-    fn section_offsets(raw: &[u8]) -> (usize, usize) {
-        let mut hlen_bytes = [0; HLEN_END_OFFSET];
-        hlen_bytes.copy_from_slice(&raw[..HLEN_END_OFFSET]);
-        let hlen = usize::from_le_bytes(hlen_bytes);
+    let hlen = usize::from_le_bytes(hlen_bytes);
 
-        let header_start = HLEN_END_OFFSET;
-        let header_end = header_start + hlen;
-
-        (header_start, header_end)
+    let mut header = vec![0; hlen];
+    let read = file
+        .read_at(&mut header, HLEN_END_OFFSET as u64)
+        .map_err(|err| Error::raw_os_error(err.raw_os_error()))?;
+    if read < header.len() {
+        return Err(Error::broken_data(0));
     }
 
-    struct SectionIter<'a> {
-        data: &'a [u8],
-        pos: usize,
-    }
+    Ok((header, HLEN_END_OFFSET + hlen))
+}
 
-    struct Section<'a> {
-        name: &'a [u8],
-        body: &'a [u8],
-    }
+struct LineIter {
+    header: Vec<u8>,
+    weight_start: usize,
+    pos: usize,
+}
 
-    impl<'a> SectionIter<'a> {
-        pub fn new(data: &'a [u8]) -> Self {
-            let data = &data[1..data.len() - 1];
-            Self { data, pos: 0 }
+impl Iterator for LineIter {
+    type Item = Result<WeightInfo<BF16>, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.header.len() < 2 {
+            return None;
+        }
+        if self.pos == 0 {
+            self.pos += 1;
+        }
+        if self.pos >= self.header.len() - 1 {
+            return None;
         }
 
-        pub fn parse_string(&mut self) -> &'a [u8] {
+        let name = parse_string(&self.header, &mut self.pos).to_vec();
+        self.pos += 1;
+
+        let body = extract_value(&self.header, &mut self.pos).to_vec();
+        if self.pos < self.header.len() && self.header[self.pos] == b',' {
             self.pos += 1;
-            let start = self.pos;
-
-            while self.pos < self.data.len() && self.data[self.pos] != b'"' {
-                self.pos += 1;
-            }
-
-            let end = self.pos;
-            self.pos += 1;
-
-            &self.data[start..end]
         }
 
-        pub fn extract_value(&mut self) -> &'a [u8] {
-            let start = self.pos;
-            let end_token = match self.data[self.pos] {
-                b'"' => b'"',
-                b'{' => b'}',
-                _ => b']',
-            };
-
-            self.pos += 1;
-            while self.pos < self.data.len() && self.data[self.pos] != end_token {
-                self.pos += 1;
-            }
-
-            self.pos += 1;
-            &self.data[start..self.pos]
+        if name == b"__metadata__" {
+            return self.next();
         }
+
+        Some(Ok(parse_tensor_info(&name, &body, self.weight_start)))
+    }
+}
+
+fn parse_string<'a>(data: &'a [u8], pos: &mut usize) -> &'a [u8] {
+    *pos += 1;
+    let start = *pos;
+
+    while *pos < data.len() && data[*pos] != b'"' {
+        *pos += 1;
     }
 
-    impl<'a> Iterator for SectionIter<'a> {
-        type Item = Section<'a>;
+    let end = *pos;
+    *pos += 1;
 
-        fn next(&mut self) -> Option<Self::Item> {
-            if self.pos >= self.data.len() {
-                return None;
+    &data[start..end]
+}
+
+fn extract_value<'a>(data: &'a [u8], pos: &mut usize) -> &'a [u8] {
+    let start = *pos;
+    let end_token = match data[*pos] {
+        b'"' => b'"',
+        b'{' => b'}',
+        _ => b']',
+    };
+
+    *pos += 1;
+    while *pos < data.len() && data[*pos] != end_token {
+        *pos += 1;
+    }
+
+    *pos += 1;
+    &data[start..*pos]
+}
+
+fn parse_array(text: &[u8]) -> Vec<usize> {
+    let mut res = Vec::new();
+    let mut num = 0;
+
+    for &byte in &text[1..text.len() - 1] {
+        match byte {
+            b',' => {
+                res.push(num);
+                num = 0;
             }
-
-            let key = self.parse_string();
-            self.pos += 1;
-
-            let value = self.extract_value();
-            if self.pos < self.data.len() && self.data[self.pos] == b',' {
-                self.pos += 1;
-            }
-
-            Some(Self::Item {
-                name: key,
-                body: value,
-            })
-        }
-    }
-
-    fn is_not_metadata(section: &Section) -> bool {
-        section.name != b"__metadata__"
-    }
-
-    fn parse_array(text: &[u8]) -> Vec<usize> {
-        let mut res = Vec::new();
-        let mut num = 0;
-
-        for &byte in &text[1..text.len() - 1] {
-            match byte {
-                b',' => {
-                    res.push(num);
-                    num = 0;
-                }
-                _ => {
-                    num *= 10;
-                    num += (byte - b'0') as usize;
-                }
+            _ => {
+                num *= 10;
+                num += (byte - b'0') as usize;
             }
         }
-        res.push(num);
+    }
+    res.push(num);
 
-        res
+    res
+}
+
+fn parse_tensor_info(name: &[u8], body: &[u8], additional_offset: usize) -> WeightInfo<BF16> {
+    let name = unsafe { std::str::from_utf8_unchecked(name) }.to_string();
+    let mut pos = 1;
+
+    parse_string(body, &mut pos);
+    pos += 1;
+    extract_value(body, &mut pos);
+    if body[pos] == b',' {
+        pos += 1;
     }
 
-    fn parse_tensor_info(section: Section, additional_offset: usize) -> WeightInfo<BF16> {
-        let name = unsafe { std::str::from_utf8_unchecked(section.name) }.to_string();
-        let mut parser = SectionIter::new(section.body);
+    parse_string(body, &mut pos);
+    pos += 1;
+    let section_shape = extract_value(body, &mut pos);
+    let shape = parse_array(section_shape)
+        .into_iter()
+        .map(|x| x as u32)
+        .collect();
+    if body[pos] == b',' {
+        pos += 1;
+    }
 
-        parser.next();
+    parse_string(body, &mut pos);
+    pos += 1;
+    let section_offsets = extract_value(body, &mut pos);
+    let offset = parse_array(section_offsets);
+    let offset = (offset[0] + additional_offset)..(offset[1] + additional_offset);
 
-        let section_shape = parser.next().unwrap();
-        let shape = parse_array(section_shape.body)
-            .into_iter()
-            .map(|x| x as u32)
-            .collect();
-
-        let section_offsets = parser.next().unwrap();
-        let offset = parse_array(section_offsets.body);
-        let offset = (offset[0] + additional_offset)..(offset[1] + additional_offset);
-
-        WeightInfo {
-            name,
-            shape,
-            offset,
-            _phantom: PhantomData,
-        }
+    WeightInfo {
+        name,
+        shape,
+        offset,
+        _phantom: PhantomData,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use core::BF16;
+    use common::BF16;
 
     use super::{WeightFormat, WeightInfo};
     use crate::Format;
@@ -210,10 +215,14 @@ mod tests {
             let weight_format = WeightFormat::Safetensor {
                 path: WEIGHT_PATH.to_string(),
             };
-            let (file, parse) = weight_format.read().expect("Failed to read weight format");
+            let (file, parse) = weight_format.open().expect("Failed to read weight format");
 
             let iter = parse(&file);
-            iter.map(|w| (w.name.clone(), w)).collect()
+            iter.map(|w| {
+                let w = w.expect("Failed to parse weight info");
+                (w.name.clone(), w)
+            })
+            .collect()
         })
     }
 

@@ -25,7 +25,6 @@ version = "0.2.0"
 name = "config"
 version = "0.2.0"
 dependencies = [
- "backend-host",
  "common",
 ]
 

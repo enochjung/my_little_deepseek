@@ -10,8 +10,9 @@ pub use unicode::UnicodeFormat;
 pub use vocab::VocabFormat;
 pub use weight::{WeightFormat, WeightInfo};
 
-use backend_host::Mmap;
-use core::MLTError;
+use common::Error;
+
+use std::fs::File;
 
 /// Configuration blueprint for initializing the inference engine model.
 ///
@@ -290,10 +291,10 @@ impl Configure {
 }
 
 pub trait Format {
-    type Output;
-    type Parser: Fn(&Mmap<u8>) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Item;
+    type Parser: Fn(&File) -> Box<dyn Iterator<Item = Self::Item> + '_>;
 
-    fn read(&self) -> Result<(Mmap<u8>, Self::Parser), MLTError>;
+    fn open(&self) -> Result<(File, Self::Parser), Error>;
 }
 
 fn parse_hex_u32(text: &[u8]) -> u32 {

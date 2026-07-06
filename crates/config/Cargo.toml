@@ -5,5 +5,4 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-backend-host.workspace = true
 common.workspace = true

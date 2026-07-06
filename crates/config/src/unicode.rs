@@ -1,9 +1,9 @@
-use backend_host::Mmap;
-use core::MLTError;
+use common::Error;
 
 use super::{Format, parse_hex_u32, parse_u8};
 
 use std::fs::File;
+use std::io::{BufRead, BufReader};
 
 pub enum UnicodeFormat {
     UnicodeCharacterDatabase { path: String },
@@ -16,38 +16,71 @@ pub struct UCDLine {
 }
 
 impl Format for UnicodeFormat {
-    type Output = Result<UCDLine, MLTError>;
-    type Parser = fn(&Mmap<u8>) -> Box<dyn Iterator<Item = Self::Output> + '_>;
+    type Item = Result<UCDLine, Error>;
+    type Parser = fn(&File) -> Box<dyn Iterator<Item = Self::Item> + '_>;
 
-    fn read(&self) -> Result<(Mmap<u8>, Self::Parser), MLTError> {
+    fn open(&self) -> Result<(File, Self::Parser), Error> {
         match &self {
             UnicodeFormat::UnicodeCharacterDatabase { path } => {
-                let file = File::open(path).map_err(MLTError::io)?;
-                let mem = Mmap::try_from(file)?;
-                Ok((mem, parse_ucd))
+                let file =
+                    File::open(path).map_err(|err| Error::raw_os_error(err.raw_os_error()))?;
+                Ok((file, parse_ucd))
             }
         }
     }
 }
 
-fn parse_ucd(file: &Mmap<u8>) -> Box<dyn Iterator<Item = Result<UCDLine, MLTError>> + '_> {
-    let lines = file.as_slice().split(|&x| x == b'\n');
-
-    let iter = lines
-        .enumerate()
-        .filter(|(_, text)| !text.is_empty())
-        .map(|(idx, text)| {
-            let line_no = idx + 1;
-            parse_ucd_line(text, line_no)
-        });
-
-    Box::new(iter)
+fn parse_ucd(file: &File) -> Box<dyn Iterator<Item = Result<UCDLine, Error>> + '_> {
+    Box::new(LineIter {
+        reader: BufReader::new(file),
+        buf: Vec::with_capacity(256),
+        line_no: 0,
+    })
 }
 
-fn parse_ucd_line(text: &[u8], line_no: usize) -> Result<UCDLine, MLTError> {
+struct LineIter<'a> {
+    reader: BufReader<&'a File>,
+    buf: Vec<u8>,
+    line_no: usize,
+}
+
+impl Iterator for LineIter<'_> {
+    type Item = Result<UCDLine, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            self.buf.clear();
+
+            let read = match self.reader.read_until(b'\n', &mut self.buf) {
+                Ok(read) => read,
+                Err(_) => return Some(Err(Error::broken_data(self.line_no + 1))),
+            };
+
+            if read == 0 {
+                return None;
+            }
+
+            self.line_no += 1;
+
+            if self.buf.last() == Some(&b'\n') {
+                self.buf.pop();
+            }
+            if self.buf.last() == Some(&b'\r') {
+                self.buf.pop();
+            }
+            if self.buf.is_empty() {
+                continue;
+            }
+
+            return Some(parse_ucd_line(&self.buf, self.line_no));
+        }
+    }
+}
+
+fn parse_ucd_line(text: &[u8], line_no: usize) -> Result<UCDLine, Error> {
     let fields = text.split(|x| *x == b';').collect::<Vec<_>>();
     if fields.len() != 15 {
-        return Err(MLTError::broken_data(line_no));
+        return Err(Error::broken_data(line_no));
     }
 
     let codepoint = parse_hex_u32(fields[0]);
