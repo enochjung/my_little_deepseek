@@ -1,6 +1,6 @@
 use common::Error;
 
-use super::{Format, parse_string_with_escape_sequence, parse_u32};
+use crate::{Format, parse_string_with_escape_sequence, parse_u32};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};

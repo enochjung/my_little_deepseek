@@ -1,6 +1,6 @@
 use common::Error;
 
-use super::{Format, parse_hex_u32, parse_u8};
+use crate::{Format, parse_hex_u32, parse_u8};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
