@@ -1,6 +1,6 @@
-use common::{Error, Memory, MemoryMut, MemoryOwn};
+use common::{ElemType, Error, Memory, MemoryMut, MemoryRef};
 
-use std::os::fd::AsRawFd;
+use crate::Host;
 
 /// A hardware abstraction representing the CPU memory.
 ///
@@ -12,77 +12,61 @@ use std::os::fd::AsRawFd;
 /// In the current architecture, it serves safely as both the Embedding Device (`ED`)
 /// and Transformer Device (`TD`).
 #[repr(C)]
-pub struct HostMem<T> {
-    ptr: *mut T,
-    size: usize,
+pub struct HostMem<T: ElemType> {
+    pub mmap_ptr: *mut T,
+    pub nrow: u32,
+    pub ncol: u32,
 }
 
-impl<T> HostMem<T> {
-    pub fn as_slice(&self) -> &[T] {
-        let len = self.size / size_of::<T>();
-        unsafe { std::slice::from_raw_parts(self.ptr, len) }
+impl<T: ElemType> HostMem<T> {
+    fn size(&self) -> usize {
+        (self.nrow as usize) * (self.ncol as usize) * size_of::<T>()
     }
 }
 
-impl<T> TryFrom<std::fs::File> for HostMem<T> {
-    type Error = Error;
-
-    fn try_from(file: std::fs::File) -> Result<Self, Self::Error> {
-        let metadata = file.metadata().map_err(Error::io)?;
-        let fd = file.as_raw_fd();
-        let size = (metadata.len() as usize).next_multiple_of(size_of::<T>());
-        let ptr = file_mmap(fd, size)? as *mut T;
-        Ok(Self { ptr, size })
-    }
-}
-
-impl<T> Drop for HostMem<T> {
+impl<T: ElemType> Drop for HostMem<T> {
     fn drop(&mut self) {
         unsafe {
-            libc::munmap(self.ptr as *mut libc::c_void, self.size);
+            libc::munmap(self.mmap_ptr as *mut libc::c_void, self.size());
         }
     }
 }
 
-unsafe impl<T> Send for HostMem<T> {}
-unsafe impl<T> Sync for HostMem<T> {}
+unsafe impl<T: ElemType> Send for HostMem<T> {}
+unsafe impl<T: ElemType> Sync for HostMem<T> {}
 
-impl<T> Memory for HostMem<T> {
-    type Item = T;
-    type Base = Self;
+impl MemoryRef for HostMem<f32> {
+    type Item = f32;
+    type Base = Host<f32>;
 
-    fn as_base(&self) -> &Self::Base {
-        self
-    }
-    fn size(&self) -> usize {
-        self.size
-    }
-    fn as_ptr(&self) -> *const Self::Item {
-        self.ptr
+    fn shape(&self) -> (u32, u32) {
+        (self.nrow, self.ncol)
     }
 }
 
-impl<T> MemoryMut for HostMem<T> {
-    fn as_mut_base(&mut self) -> &mut Self::Base {
-        self
-    }
-    fn as_mut_ptr(&mut self) -> *mut Self::Item {
-        self.ptr
-    }
-}
+impl MemoryMut for HostMem<f32> {}
 
-impl<T> MemoryOwn for HostMem<T> {
-    fn new(size: usize) -> Result<Self, Error> {
-        let size = size.next_multiple_of(size_of::<T>());
-        let ptr = new_mmap(size)? as *mut T;
-        Ok(Self { ptr, size })
+impl Memory for HostMem<f32> {
+    fn new(nrow: u32, ncol: u32) -> Result<Self, Error> {
+        let size = (nrow as usize) * (ncol as usize) * size_of::<f32>();
+        let mmap_ptr = new_mmap(size)? as *mut f32;
+
+        Ok(Self {
+            mmap_ptr,
+            nrow,
+            ncol,
+        })
     }
 
-    fn resize(&mut self, size: usize) -> Result<(), Error> {
-        let size = size.next_power_of_two().next_multiple_of(size_of::<T>());
-        let ptr = resize_mmap(self.ptr as *mut (), self.size, size)? as *mut T;
-        self.ptr = ptr;
-        self.size = size;
+    fn resize(&mut self, nrow: u32, ncol: u32) -> Result<(), Error> {
+        let new_size = (nrow as usize) * (ncol as usize) * size_of::<f32>();
+        let prev_size = self.size();
+        let mmap_ptr = resize_mmap(self.mmap_ptr as *mut (), prev_size, new_size)? as *mut f32;
+
+        self.mmap_ptr = mmap_ptr;
+        self.nrow = nrow;
+        self.ncol = ncol;
+
         Ok(())
     }
 }
@@ -93,19 +77,6 @@ fn new_mmap(size: usize) -> Result<*mut (), Error> {
     let ptr = unsafe { libc::mmap(std::ptr::null_mut(), size, prot, flags, -1, 0) };
     if ptr == libc::MAP_FAILED {
         return Err(Error::memory_allocation_failed(size));
-    }
-    Ok(ptr as *mut ())
-}
-
-fn file_mmap(fd: i32, size: usize) -> Result<*mut (), Error> {
-    if size == 0 {
-        return Err(Error::memory_allocation_failed(0));
-    }
-    let prot = libc::PROT_READ | libc::PROT_WRITE;
-    let flags = libc::MAP_PRIVATE;
-    let ptr = unsafe { libc::mmap(std::ptr::null_mut(), size, prot, flags, fd, 0) };
-    if ptr == libc::MAP_FAILED {
-        return Err(Error::insufficient_storage_space(size, 0));
     }
     Ok(ptr as *mut ())
 }

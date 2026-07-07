@@ -1,20 +1,8 @@
-//#![feature(stdarch_x86_avx512_bf16)]
-//#![feature(min_specialization)]
-
-//mod host_bf16;
-mod host_f32;
+mod host;
 mod kernel;
 mod mem;
 
-pub use mem::HostMem;
-
-use common::ElemType;
-
-use core::marker::PhantomData;
-
-pub struct Host<T: ElemType> {
-    _phantom: PhantomData<T>,
-}
+pub use host::Host;
 
 /*
 impl CastUnalignedBF16 for f32 {
