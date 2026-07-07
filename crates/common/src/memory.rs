@@ -1,59 +1,36 @@
+use crate::backend::Backend;
 use crate::error::Error;
 
-pub trait Memory: Send + Sync {
+pub trait MemoryRef: Send + Sync {
     type Item;
-    type Base: MemoryOwn;
+    type Base: Backend;
 
-    fn as_base(&self) -> &Self::Base;
-    fn size(&self) -> usize;
-    fn as_ptr(&self) -> *const Self::Item;
+    fn shape(&self) -> (u32, u32);
 }
 
-pub trait MemoryMut: Memory {
-    fn as_mut_base(&mut self) -> &mut Self::Base;
-    fn as_mut_ptr(&mut self) -> *mut Self::Item;
+pub trait MemoryMut: MemoryRef {}
+
+pub trait Memory: MemoryMut + Sized {
+    fn new(nrow: u32, ncol: u32) -> Result<Self, Error>;
+    fn resize(&mut self, nrow: u32, ncol: u32) -> Result<(), Error>;
 }
 
-pub trait MemoryOwn: MemoryMut<Base = Self> + Sized {
-    fn new(size: usize) -> Result<Self, Error>;
-    fn resize(&mut self, size: usize) -> Result<(), Error>;
-}
+impl<M: Memory> MemoryRef for &M {
+    type Item = M::Item;
+    type Base = M::Base;
 
-impl<MO: MemoryOwn> Memory for &MO {
-    type Item = MO::Item;
-    type Base = MO;
-
-    fn size(&self) -> usize {
-        (**self).size()
-    }
-    fn as_base(&self) -> &Self::Base {
-        (**self).as_base()
-    }
-    fn as_ptr(&self) -> *const Self::Item {
-        (**self).as_ptr()
+    fn shape(&self) -> (u32, u32) {
+        (**self).shape()
     }
 }
 
-impl<MO: MemoryOwn> Memory for &mut MO {
-    type Item = MO::Item;
-    type Base = MO;
+impl<M: Memory> MemoryRef for &mut M {
+    type Item = M::Item;
+    type Base = M::Base;
 
-    fn size(&self) -> usize {
-        (**self).size()
-    }
-    fn as_base(&self) -> &Self::Base {
-        (**self).as_base()
-    }
-    fn as_ptr(&self) -> *const Self::Item {
-        (**self).as_ptr()
+    fn shape(&self) -> (u32, u32) {
+        (**self).shape()
     }
 }
 
-impl<MO: MemoryOwn> MemoryMut for &mut MO {
-    fn as_mut_base(&mut self) -> &mut Self::Base {
-        (**self).as_mut_base()
-    }
-    fn as_mut_ptr(&mut self) -> *mut Self::Item {
-        (**self).as_mut_ptr()
-    }
-}
+impl<M: Memory> MemoryMut for &mut M {}

@@ -1,52 +1,51 @@
-use crate::elem_type::ElemType;
-
-use core::marker::PhantomData;
 use core::ops::{Bound, RangeBounds};
 
-pub struct MatrixLayout<T: ElemType> {
-    pub offset: usize,
+pub struct MatrixLayout {
+    pub srow: u32,
+    pub scol: u32,
     pub nrow: u32,
     pub ncol: u32,
-    pub row_stride: u32,
-    pub col_stride: u32,
-    _phantom: PhantomData<T>,
+    pub is_trans: bool,
 }
 
-impl<T: ElemType> MatrixLayout<T> {
-    pub fn new(offset: usize, nrow: u32, ncol: u32, row_stride: u32, col_stride: u32) -> Self {
+impl MatrixLayout {
+    pub fn new(srow: u32, scol: u32, nrow: u32, ncol: u32, is_trans: bool) -> Self {
         Self {
-            offset,
+            srow,
+            scol,
             nrow,
             ncol,
-            row_stride,
-            col_stride,
-            _phantom: PhantomData,
+            is_trans,
         }
     }
 
-    pub fn rc_offset(&self, r: u32, c: u32) -> usize {
-        (r as usize * self.row_stride as usize + c as usize * self.col_stride as usize)
-            * size_of::<T>()
-            + self.offset
-    }
-
-    pub fn transpose(mut self) -> Self {
-        core::mem::swap(&mut self.nrow, &mut self.ncol);
-        core::mem::swap(&mut self.row_stride, &mut self.col_stride);
-        self
+    pub fn shape(&self) -> (u32, u32) {
+        match self.is_trans {
+            false => (self.nrow, self.ncol),
+            true => (self.ncol, self.nrow),
+        }
     }
 
     pub fn sliced(&self, rows: impl RangeBounds<u32>, cols: impl RangeBounds<u32>) -> Self {
-        let (rs, re) = normalize(rows, self.nrow);
-        let (cs, ce) = normalize(cols, self.ncol);
+        let (rse, cse) = match self.is_trans {
+            false => {
+                let rse = normalize(rows, self.nrow);
+                let cse = normalize(cols, self.ncol);
+                (rse, cse)
+            }
+            true => {
+                let rse = normalize(cols, self.nrow);
+                let cse = normalize(rows, self.ncol);
+                (rse, cse)
+            }
+        };
 
         Self {
-            offset: self.rc_offset(rs, cs),
-            nrow: re - rs,
-            ncol: ce - cs,
-            row_stride: self.row_stride,
-            col_stride: self.col_stride,
-            _phantom: PhantomData,
+            srow: self.srow + rse.0,
+            scol: self.scol + cse.0,
+            nrow: rse.1 - rse.0,
+            ncol: cse.1 - cse.0,
+            is_trans: self.is_trans,
         }
     }
 }

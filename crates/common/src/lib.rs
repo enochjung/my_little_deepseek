@@ -10,4 +10,4 @@ pub use backend::Backend;
 pub use elem_type::{BF16, ElemType};
 pub use error::Error;
 pub use matrix_layout::MatrixLayout;
-pub use memory::{Memory, MemoryMut, MemoryOwn};
+pub use memory::{Memory, MemoryMut, MemoryRef};

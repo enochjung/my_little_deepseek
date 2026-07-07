@@ -1,10 +1,10 @@
 use crate::elem_type::ElemType;
 use crate::matrix_layout::MatrixLayout;
-use crate::memory::MemoryOwn;
+use crate::memory::Memory;
 
 pub trait Backend {
     type Item: ElemType;
-    type Mem: MemoryOwn<Item = Self::Item>;
+    type Mem: Memory<Item = Self::Item>;
 
     /// Adds `src` to `dst` element-wise.
     ///
@@ -12,23 +12,22 @@ pub trait Backend {
     /// Physical index: `idx = offset + (i * row_stride) + (j * col_stride)`
     ///
     /// # Safety
-    /// - `dst` and `src` must have identical dimensions (`nrow` and `ncol`).
-    /// - Pointers derived from `dst` and `src` must be valid for reads/writes up to their respective maximum physical indices:
-    ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
-    /// - Memory regions of `dst` and `src` must not overlap.
+    // - dst_layout.shape == src_layout.shape
+    // - layouts are valid for the given memory
+    // - dst and src layouts are not overlapped.
     unsafe fn elem_add_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
     );
 
     /// Adds the first row of `src` to all rows of `dst` (broadcasting).
     ///
     /// Conceptually: `dst[i, j] += src[0, j]`
     /// Physical index:
-    /// - `dst_idx = dst_ml.offset + (i * dst_ml.row_stride) + (j * dst_ml.col_stride)`
-    /// - `src_idx = src_ml.offset + (j * src_ml.col_stride)`
+    /// - `dst_idx = dst_layout.offset + (i * dst_layout.row_stride) + (j * dst_layout.col_stride)`
+    /// - `src_idx = src_layout.offset + (j * src_layout.col_stride)`
     ///
     /// # Safety
     /// - `dst` and `src` must have an identical number of columns (`ncol`).
@@ -36,10 +35,10 @@ pub trait Backend {
     /// - Pointers derived from `src` must be valid for reads up to `offset + (ncol - 1) * col_stride`.
     /// - Memory regions of `dst` and `src` must not overlap.
     unsafe fn elem_br_add_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
     );
 
     /// Finds the index of the maximum value in the first row of `src`.
@@ -52,7 +51,7 @@ pub trait Backend {
     /// - `src` must have exactly 1 row (`nrow == 1`).
     /// - `src` must have a column stride of 1 (`col_stride == 1`).
     /// - Pointers derived from `src` must be valid for reads up to `offset + (ncol - 1) * col_stride`.
-    unsafe fn argmax(src: &Self::Mem, src_ml: &MatrixLayout<Self::Item>) -> u32;
+    unsafe fn argmax(src_mem: &Self::Mem, src_layout: &MatrixLayout) -> u32;
 
     /// Copies values from `src` to `dst`.
     ///
@@ -65,10 +64,10 @@ pub trait Backend {
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     /// - Memory regions of `dst` and `src` must not overlap.
     unsafe fn copy(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
     );
 
     /// Fills all elements of `dst` with a given scalar value.
@@ -78,7 +77,7 @@ pub trait Backend {
     ///
     /// # Safety
     /// - Pointers derived from `dst` must be valid for writes up to `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
-    unsafe fn fill(dst: &mut Self::Mem, dst_ml: &MatrixLayout<Self::Item>, value: Self::Item);
+    unsafe fn fill(dst_mem: &mut Self::Mem, dst_layout: &MatrixLayout, value: Self::Item);
 
     /// Multiplies all elements of `dst` by a given scalar value in-place.
     ///
@@ -88,8 +87,8 @@ pub trait Backend {
     /// # Safety
     /// - Pointers derived from `dst` must be valid for reads/writes up to `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     unsafe fn scalar_mul_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
         value: Self::Item,
     );
 
@@ -104,12 +103,12 @@ pub trait Backend {
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     /// - Memory region of `dst` must not overlap with `src0` or `src1`.
     unsafe fn elem_mul(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src0: &Self::Mem,
-        src0_ml: &MatrixLayout<Self::Item>,
-        src1: &Self::Mem,
-        src1_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src0_mem: &Self::Mem,
+        src0_layout: &MatrixLayout,
+        src1_mem: &Self::Mem,
+        src1_layout: &MatrixLayout,
     );
 
     /// Multiplies `dst` by `src` element-wise in-place.
@@ -123,10 +122,10 @@ pub trait Backend {
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     /// - Memory regions of `dst` and `src` must not overlap.
     unsafe fn elem_mul_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
     );
 
     /// Computes the element-wise product of `src0` and `src1` and adds it to `dst`.
@@ -140,12 +139,12 @@ pub trait Backend {
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     /// - Memory region of `dst` must not overlap with `src0` or `src1`.
     unsafe fn elem_muladd_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src0: &Self::Mem,
-        src0_ml: &MatrixLayout<Self::Item>,
-        src1: &Self::Mem,
-        src1_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src0_mem: &Self::Mem,
+        src0_layout: &MatrixLayout,
+        src1_mem: &Self::Mem,
+        src1_layout: &MatrixLayout,
     );
 
     /// Computes the element-wise product of `src0` and `src1` and subtracts it from `dst`.
@@ -159,51 +158,51 @@ pub trait Backend {
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     /// - Memory region of `dst` must not overlap with `src0` or `src1`.
     unsafe fn elem_mulsub_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src0: &Self::Mem,
-        src0_ml: &MatrixLayout<Self::Item>,
-        src1: &Self::Mem,
-        src1_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src0_mem: &Self::Mem,
+        src0_layout: &MatrixLayout,
+        src1_mem: &Self::Mem,
+        src1_layout: &MatrixLayout,
     );
 
     /// Performs matrix multiplication of `src0` and `src1` into `dst`.
     ///
     /// Conceptually: `dst = src0 @ src1`
     /// Physical index:
-    /// - `dst[i, j]: dst_ml.offset + (i * dst_ml.row_stride) + (j * dst_ml.col_stride)`
-    /// - `src0[i, k]: src0_ml.offset + (i * src0_ml.row_stride) + (k * src0_ml.col_stride)`
-    /// - `src1[k, j]: src1_ml.offset + (k * src1_ml.row_stride) + (j * src1_ml.col_stride)`
+    /// - `dst[i, j]: dst_layout.offset + (i * dst_layout.row_stride) + (j * dst_layout.col_stride)`
+    /// - `src0[i, k]: src0_layout.offset + (i * src0_layout.row_stride) + (k * src0_layout.col_stride)`
+    /// - `src1[k, j]: src1_layout.offset + (k * src1_layout.row_stride) + (j * src1_layout.col_stride)`
     ///
     /// # Safety
-    /// - Matrix dimensions must be compatible for multiplication (`src0_ml.ncol == src1_ml.nrow`, `dst_ml.nrow == src0_ml.nrow`, `dst_ml.ncol == src1_ml.ncol`).
+    /// - Matrix dimensions must be compatible for multiplication (`src0_layout.ncol == src1_layout.nrow`, `dst_layout.nrow == src0_layout.nrow`, `dst_layout.ncol == src1_layout.ncol`).
     /// - Pointers derived from `dst`, `src0`, and `src1` must be valid for reads/writes up to their respective maximum physical indices.
     /// - Memory region of `dst` must not overlap with `src0` or `src1`.
     unsafe fn matmul(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src0: &Self::Mem,
-        src0_ml: &MatrixLayout<Self::Item>,
-        src1: &Self::Mem,
-        src1_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src0_mem: &Self::Mem,
+        src0_layout: &MatrixLayout,
+        src1_mem: &Self::Mem,
+        src1_layout: &MatrixLayout,
     );
 
     /// Performs in-place matrix multiplication of `dst` and `src`.
     ///
     /// Conceptually: `dst = dst @ src`
     /// Physical index:
-    /// - `dst[i, k]: dst_ml.offset + (i * dst_ml.row_stride) + (k * dst_ml.col_stride)`
-    /// - `src[k, j]: src_ml.offset + (k * src_ml.row_stride) + (j * src_ml.col_stride)`
+    /// - `dst[i, k]: dst_layout.offset + (i * dst_layout.row_stride) + (k * dst_layout.col_stride)`
+    /// - `src[k, j]: src_layout.offset + (k * src_layout.row_stride) + (j * src_layout.col_stride)`
     ///
     /// # Safety
-    /// - Matrix dimensions must be compatible and support in-place update (`dst_ml.ncol == src_ml.nrow` and `src_ml.nrow == src_ml.ncol`).
+    /// - Matrix dimensions must be compatible and support in-place update (`dst_layout.ncol == src_layout.nrow` and `src_layout.nrow == src_layout.ncol`).
     /// - Pointers derived from `dst` and `src` must be valid for reads/writes up to their respective maximum physical indices.
     /// - Memory regions of `dst` and `src` must not overlap.
     unsafe fn matmul_assign(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
     );
 
     /// Applies Root Mean Square (RMS) normalization to `dst` and scales by `src`.
@@ -211,8 +210,8 @@ pub trait Backend {
     /// Conceptually: `dst[i, j] = dst[i, j] * src[0, j] / (rms[i] + epsilon)`
     /// where `rms[i] = sqrt(sum_k(dst[i, k]^2) / ncol)`
     /// Physical index:
-    /// - `dst[i, j]: dst_ml.offset + (i * dst_ml.row_stride) + (j * dst_ml.col_stride)`
-    /// - `src[0, j]: src_ml.offset + (j * src_ml.col_stride)`
+    /// - `dst[i, j]: dst_layout.offset + (i * dst_layout.row_stride) + (j * dst_layout.col_stride)`
+    /// - `src[0, j]: src_layout.offset + (j * src_layout.col_stride)`
     ///
     /// # Safety
     /// - `dst` and `src` must have an identical number of columns (`ncol`).
@@ -220,11 +219,11 @@ pub trait Backend {
     /// - Pointers derived from `src` must be valid for reads up to `offset + (ncol - 1) * col_stride`.
     /// - Memory regions of `dst` and `src` must not overlap.
     unsafe fn rms_norm(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        src: &Self::Mem,
-        src_ml: &MatrixLayout<Self::Item>,
-        epsilon: f32,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
+        src_mem: &Self::Mem,
+        src_layout: &MatrixLayout,
+        epsilon: Self::Item,
     );
 
     /// Applies Rotary Position Embedding (RoPE) cosine frequencies to `dst`.
@@ -235,8 +234,8 @@ pub trait Backend {
     /// # Safety
     /// - Pointers derived from `dst` must be valid for reads/writes up to `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     unsafe fn rope_cos(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
         k: Self::Item,
         theta: Self::Item,
         d: Self::Item,
@@ -250,8 +249,8 @@ pub trait Backend {
     /// # Safety
     /// - Pointers derived from `dst` must be valid for reads/writes up to `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
     unsafe fn rope_sin(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
+        dst_mem: &mut Self::Mem,
+        dst_layout: &MatrixLayout,
         k: Self::Item,
         theta: Self::Item,
         d: Self::Item,
@@ -270,11 +269,7 @@ pub trait Backend {
     /// - `dst` must be row-major (`col_stride == 1`).
     /// - Pointers derived from `dst` must be valid for reads/writes up to
     ///   `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
-    unsafe fn masked_safe_softmax(
-        dst: &mut Self::Mem,
-        dst_ml: &MatrixLayout<Self::Item>,
-        n_mask: u32,
-    );
+    unsafe fn masked_safe_softmax(dst_mem: &mut Self::Mem, dst_layout: &MatrixLayout, n_mask: u32);
 
     /// Applies the SiLU (Swish) activation function to `dst` in-place.
     ///
@@ -283,5 +278,5 @@ pub trait Backend {
     ///
     /// # Safety
     /// - Pointers derived from `dst` must be valid for reads/writes up to `offset + (nrow - 1) * row_stride + (ncol - 1) * col_stride`.
-    unsafe fn silu(dst: &mut Self::Mem, dst_ml: &MatrixLayout<Self::Item>);
+    unsafe fn silu(dst_mem: &mut Self::Mem, dst_layout: &MatrixLayout);
 }
